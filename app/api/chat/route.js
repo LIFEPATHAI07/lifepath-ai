@@ -7,7 +7,11 @@ const detectLanguage = (text) => {
   if (/[\u0B80-\u0BFF]/.test(text)) return "tamil";
   const lower = text.toLowerCase();
   const manglish = ["machane","machi","alle","aano","enthu","chetta","eda","pinne","sheriyanu","adipoli","enthokke","ivide","appo","pwoli","njan","ningal","sheri"];
-  if (manglish.some(w => lower.includes(w))) return "manglish";
+// Only detect manglish if majority of message has Malayalam flavor
+// Count English words vs manglish words
+const wordCount = lower.split(" ").length;
+const manglishCount = manglish.filter(w => lower.includes(w)).length;
+if (manglishCount > 0 && manglishCount / wordCount > 0.1) return "manglish";
   const hinglish = ["bhai","yaar","kya","hai","nahi","bol","kar","accha","theek","bahut","toh","aur","dekh","sun","tera","mera"];
   if (hinglish.some(w => lower.includes(w))) return "hinglish";
   return "english";
