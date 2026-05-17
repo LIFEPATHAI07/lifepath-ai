@@ -52,7 +52,7 @@ const parseJobCards = (text) => {
     const apply = b.match(/APPLY:\s*(https?:\/\/[^\s\n]+)/i)?.[1]?.trim();
     if (role) cards.push({ role, company: company || "", salary: salary || "", apply: apply || `https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(role)}&location=India` });
   });
-  return cards.slice(0, 3);
+  return cards.slice(0, 5);
 };
 
 const parseLinks = (text) => {
@@ -64,11 +64,12 @@ const parseLinks = (text) => {
 const cleanText = (text) => text.split("\n").filter((l) => { const t = l.trim(); return !(/^[A-Z_]{3,}:\s/.test(t) && !t.startsWith("ROLE") && t.length < 120); }).join("\n");
 
 const PILLARS = [
-  { id: "career", icon: "🛡️", label: "Career & Resume Guard", sub: "ATS Score · Risk Radar · Skill Gaps", color: "#6366f1", rgb: "99,102,241", hint: "ഞാൻ ഒരു software developer ആണ്, 3 years experience. My career safe ആണോ?" },
-  { id: "hustle", icon: "💸", label: "Side Hustle Finder", sub: "Earning · Schedule Fit · 7-Day Plan", color: "#06b6d4", rgb: "6,182,212", hint: "I work 9-5. I have 2 free hours daily. Best side hustle for me?" },
-  { id: "wealth", icon: "💰", label: "Wealth & Finance Guard", sub: "Health Score · Leak Alert · SIP Advice", color: "#10b981", rgb: "16,185,129", hint: "ഞാൻ ₹35,000 earn ചെയ്യുന്നു. Savings plan help ചെയ്യൂ." },
-  { id: "jobs", icon: "🔍", label: "Job Finder", sub: "Direct Links · Scam Check · Salary", color: "#f59e0b", rgb: "245,158,11", hint: "I want a job in Kochi. I am MEP Electrical Engineer." },
-  { id: "startup", icon: "🚀", label: "Startup Validator", sub: "Success Score · A-Z Plan · Licenses", color: "#ec4899", rgb: "236,72,153", hint: "I want to start a cloud kitchen in Kochi with ₹50,000 budget." },
+  { id: "career", icon: "🛡️", label: "Career Guard", sub: "Threats · Skill Gaps · Growth Path", color: "#6366f1", rgb: "99,102,241", hint: "I completed diploma in Electrical Engineering. Is my career safe?" },
+  { id: "cv", icon: "📄", label: "CV Builder", sub: "ATS Resume · Keywords · Professional Format", color: "#06b6d4", rgb: "6,182,212", hint: "Build me a professional CV for MEP Electrical Engineer jobs" },
+  { id: "jobs", icon: "🔍", label: "Job Finder", sub: "Direct Links · Scam Check · Salary", color: "#f59e0b", rgb: "245,158,11", hint: "I want MEP Electrical Engineer job in Kochi" },
+  { id: "wealth", icon: "💰", label: "Wealth Guard", sub: "Budget · Savings · Investment Plan", color: "#10b981", rgb: "16,185,129", hint: "I earn Rs 25,000 per month. Help me save and invest." },
+  { id: "hustle", icon: "💸", label: "Side Hustle", sub: "Extra Income · 7-Day Plan · Real Hustles", color: "#a855f7", rgb: "168,85,247", hint: "I have 2 free hours daily. Best side hustle for me?" },
+  { id: "startup", icon: "🚀", label: "Startup Validator", sub: "Honest Score · Cost · Legal Guide", color: "#ec4899", rgb: "236,72,153", hint: "I want to start a food delivery business with Rs 50,000" },
 ];
 
 const AFFS = [
@@ -296,7 +297,12 @@ const ProfileModal = ({ profile, onSave, onClose }) => {
 export default function LifePathAI() {
   const [screen, setScreen]     = useState("splash");
   const [pillar, setPillar]     = useState(null);
-  const [messages, setMessages] = useState({});
+  const [messages, setMessages] = useState(() => {
+  try {
+    const saved = localStorage.getItem("lp_chat_history");
+    return saved ? JSON.parse(saved) : {};
+  } catch { return {}; }
+});
   const [input, setInput]       = useState("");
   const [loading, setLoading]   = useState(false);
   const [phase, setPhase]       = useState(0);
@@ -341,6 +347,8 @@ export default function LifePathAI() {
       setMessages((m) => ({ ...m, [pillar.id]: [...newMsgs, { role: "assistant", content: `⚠️ ${err.message || "Connection error. Please retry."}` }] }));
     }
     setLoading(false);
+    // Save to memory
+S.set("lp_chat_history", messages);
   };
 
   const handleKey = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } };
