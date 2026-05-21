@@ -364,6 +364,7 @@ export default function LifePathAI() {
   const [showProfile, setShowProfile] = useState(false);
   const [toast, setToast] = useState("");
   const [lang, setLang] = useState("english");
+  const [accepted, setAccepted] = useState(() => S.get("lp_accepted", false));
   const bottomRef = useRef(null);
 
   const fireToast = (m) => { setToast(m); setTimeout(() => setToast(""), 3000); };
