@@ -463,6 +463,28 @@ export default function LifePathAI() {
   return (
     <div style={{ minHeight:"100vh", background:"#060b14", fontFamily:"'Syne','Segoe UI',sans-serif", maxWidth:480, margin:"0 auto", display:"flex", flexDirection:"column", position:"relative", overflowX:"hidden" }}>
       <style>{CSS}</style>
+{!accepted && screen !== "splash" && (
+  <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.95)", zIndex:500, display:"flex", alignItems:"flex-end" }}>
+    <div style={{ width:"100%", maxWidth:480, margin:"0 auto", background:"#0d1523", borderRadius:"22px 22px 0 0", padding:"28px 20px 44px", border:"1px solid rgba(255,255,255,0.07)" }}>
+      <div style={{ fontSize:28, marginBottom:12, textAlign:"center" }}>🛡️</div>
+      <div style={{ color:"#fff", fontWeight:800, fontSize:18, marginBottom:8, textAlign:"center" }}>Welcome to LifePath AI</div>
+      <div style={{ color:"#64748b", fontSize:12, lineHeight:1.7, marginBottom:20, textAlign:"center" }}>India's first AI Career and Finance Bodyguard</div>
+      <div style={{ background:"rgba(245,158,11,0.08)", border:"1px solid rgba(245,158,11,0.2)", borderRadius:12, padding:"12px 14px", marginBottom:20 }}>
+        <div style={{ color:"#f59e0b", fontSize:11, fontWeight:700, marginBottom:6 }}>⚠️ IMPORTANT</div>
+        <div style={{ color:"#94a3b8", fontSize:11, lineHeight:1.6 }}>LifePath AI gives general guidance only — not professional financial, legal, or career advice. Always verify information and consult qualified professionals before major decisions.</div>
+      </div>
+      <div style={{ color:"#475569", fontSize:11, marginBottom:20, textAlign:"center" }}>
+        By continuing you agree to our{" "}
+        <a href="/terms" style={{ color:"#06b6d4" }}>Terms</a>
+        {" "}and{" "}
+        <a href="/privacy" style={{ color:"#06b6d4" }}>Privacy Policy</a>
+      </div>
+      <button onClick={() => { setAccepted(true); S.set("lp_accepted", true); }} style={{ width:"100%", padding:14, background:"linear-gradient(135deg,#06b6d4,#0891b2)", border:"none", borderRadius:12, color:"#fff", fontWeight:700, fontSize:15, cursor:"pointer" }}>
+        I Understand — Let's Start 🚀
+      </button>
+    </div>
+  </div>
+)}
 
       {/* TOAST */}
       {toast && <div style={{ position:"fixed", top:14, left:"50%", transform:"translateX(-50%)", background:"rgba(6,182,212,.13)", border:"1px solid rgba(6,182,212,.4)", backdropFilter:"blur(12px)", borderRadius:100, padding:"7px 18px", color:"#06b6d4", fontSize:12, fontWeight:700, zIndex:400, whiteSpace:"nowrap", animation:"toastIn .3s both" }}>{toast}</div>}
@@ -678,6 +700,11 @@ export default function LifePathAI() {
               </button>
             </div>
             <div style={{ color:"#0f172a", fontSize:8, textAlign:"center", marginTop:5, letterSpacing:1.5, fontFamily:"'JetBrains Mono',monospace" }}>
+            <div style={{ textAlign:"center", padding:"0 18px 8px", display:"flex", justifyContent:"center", gap:16 }}>
+  <a href="/privacy" style={{ color:"#334155", fontSize:9, textDecoration:"none" }}>Privacy Policy</a>
+  <a href="/terms" style={{ color:"#334155", fontSize:9, textDecoration:"none" }}>Terms of Service</a>
+</div>
+
               LIFEPATH AI · ALWAYS WATCHING 🛡️
             </div>
           </div>
