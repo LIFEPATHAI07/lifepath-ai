@@ -62,21 +62,53 @@ const parseJobCards = (text) => {
     });
   });
   return cards.slice(0, 5);
-};
-
 const parseLinks = (text) => {
   const map = {
-    "linkedin.com/jobs": "💼 LinkedIn Jobs", "naukri.com": "📋 Naukri",
-    "internshala.com": "🎓 Internshala", "indeed.co.in": "🔎 Indeed",
-    "norkaroots": "🌍 NORKA Gulf", "keralapsc.gov.in": "🏛️ Kerala PSC",
-    "ksum.org": "🚀 KSUM", "startupindia.gov": "🇮🇳 Startup India",
-    "angellist": "👼 AngelList", "letsventure": "💡 LetsVenture",
-    "coursera.org": "📚 Coursera", "udemy.com": "🎯 Udemy",
-    "nptel.ac.in": "🎓 NPTEL Free", "upwork.com": "💻 Upwork",
-    "fiverr.com": "⚡ Fiverr", "groww.in": "📈 Groww",
-    "zerodha.com": "💰 Zerodha", "scholarships.gov.in": "🏆 Scholarships",
-    "gst.gov.in": "📋 GST Portal", "udyamregistration": "🏭 MSME Udyam",
+    "linkedin.com/jobs": "💼 LinkedIn Jobs",
+    "naukri.com": "📋 Naukri",
+    "internshala.com": "🎓 Internshala",
+    "indeed.co.in": "🔎 Indeed",
+    "indeed.com": "🔎 Indeed",
+    "norkaroots": "🌍 NORKA Gulf",
+    "keralapsc.gov.in": "🏛️ Kerala PSC",
+    "startupmission": "🚀 KSUM",
+    "startupindia.gov": "🇮🇳 Startup India",
+    "angellist": "👼 AngelList",
+    "letsventure": "💡 LetsVenture",
+    "coursera.org": "📚 Coursera",
+    "udemy.com": "🎯 Udemy",
+    "nptel.ac.in": "🎓 NPTEL Free",
+    "upwork.com": "💻 Upwork",
+    "fiverr.com": "⚡ Fiverr",
+    "groww.in": "📈 Groww",
+    "coin.zerodha": "💰 Zerodha",
+    "scholarships.gov.in": "🏆 Scholarships",
+    "gst.gov.in": "📋 GST Portal",
+    "udyamregistration": "🏭 MSME Udyam",
+    "fssai.gov.in": "🍽️ FSSAI",
+    "ipindia.gov.in": "™️ Trademark",
+    "affiliate-program.amazon": "🛒 Amazon Affiliate",
+    "supplier.meesho": "🛍️ Meesho",
+    "sell.amazon": "🛒 Amazon Sell",
+    "promptbase.com": "🤖 PromptBase",
+    "gumroad.com": "💸 Gumroad",
+    "hostinger": "🌐 Hostinger",
+    "canva.com": "🎨 Canva Free",
+    "cee.kerala.gov.in": "📝 KEAM",
+    "jeemain.nta.nic.in": "📝 JEE",
+    "neet.nta.nic.in": "📝 NEET",
+    "mca.gov.in": "🏢 MCA Portal",
+    "scale.ai": "🤖 Scale AI",
+    "toloka.ai": "🤖 Toloka",
+    "printful.com": "👕 Printful",
+    "etsy.com": "🛍️ Etsy",
   };
+  const urls = [...new Set((text.match(/https?:\/\/[a-zA-Z0-9\-._~:/?#[\]@!$&'()*+,;=%]+/g) || []))];
+  return urls.map(url => {
+    const k = Object.keys(map).find(k => url.includes(k));
+    return k ? { label: map[k], url } : { label: "🔗 Open Link", url };
+  }).filter(Boolean).slice(0, 8);
+};
   const urls = [...new Set((text.match(/https?:\/\/[a-zA-Z0-9\-._~:/?#[\]@!$&'()*+,;=%]+/g) || []))];
   return urls.map(url => {
     const k = Object.keys(map).find(k => url.includes(k));
