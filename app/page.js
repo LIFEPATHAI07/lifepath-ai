@@ -62,7 +62,7 @@ const parseJobCards = (text) => {
     });
   });
   return cards.slice(0, 5);
-const parseLinks = (text) => {
+  const parseLinks = (text) => {
   const map = {
     "linkedin.com/jobs": "💼 LinkedIn Jobs",
     "naukri.com": "📋 Naukri",
@@ -77,7 +77,7 @@ const parseLinks = (text) => {
     "letsventure": "💡 LetsVenture",
     "coursera.org": "📚 Coursera",
     "udemy.com": "🎯 Udemy",
-    "nptel.ac.in": "🎓 NPTEL Free",
+    "nptel.ac.in": "🎓 NPTEL",
     "upwork.com": "💻 Upwork",
     "fiverr.com": "⚡ Fiverr",
     "groww.in": "📈 Groww",
@@ -87,33 +87,29 @@ const parseLinks = (text) => {
     "udyamregistration": "🏭 MSME Udyam",
     "fssai.gov.in": "🍽️ FSSAI",
     "ipindia.gov.in": "™️ Trademark",
-    "affiliate-program.amazon": "🛒 Amazon Affiliate",
+    "affiliate-program.amazon": "🛒 Amazon",
     "supplier.meesho": "🛍️ Meesho",
     "sell.amazon": "🛒 Amazon Sell",
     "promptbase.com": "🤖 PromptBase",
     "gumroad.com": "💸 Gumroad",
     "hostinger": "🌐 Hostinger",
-    "canva.com": "🎨 Canva Free",
+    "canva.com": "🎨 Canva",
     "cee.kerala.gov.in": "📝 KEAM",
     "jeemain.nta.nic.in": "📝 JEE",
     "neet.nta.nic.in": "📝 NEET",
-    "mca.gov.in": "🏢 MCA Portal",
     "scale.ai": "🤖 Scale AI",
-    "toloka.ai": "🤖 Toloka",
     "printful.com": "👕 Printful",
     "etsy.com": "🛍️ Etsy",
   };
-  const urls = [...new Set((text.match(/https?:\/\/[a-zA-Z0-9\-._~:/?#[\]@!$&'()*+,;=%]+/g) || []))];
-  return urls.map(url => {
-    const k = Object.keys(map).find(k => url.includes(k));
-    return k ? { label: map[k], url } : { label: "🔗 Open Link", url };
-  }).filter(Boolean).slice(0, 8);
-};
-  const urls = [...new Set((text.match(/https?:\/\/[a-zA-Z0-9\-._~:/?#[\]@!$&'()*+,;=%]+/g) || []))];
-  return urls.map(url => {
-    const k = Object.keys(map).find(k => url.includes(k));
-    return k ? { label: map[k], url } : null;
-  }).filter(Boolean).slice(0, 6);
+  try {
+    const urls = [...new Set((text.match(/https?:\/\/[a-zA-Z0-9\-._~:/?#[\]@!$&'()*+,;=%]+/g) || []))];
+    return urls.map((url) => {
+      const k = Object.keys(map).find((k) => url.includes(k));
+      return k ? { label: map[k], url } : null;
+    }).filter(Boolean).slice(0, 8);
+  } catch {
+    return [];
+  }
 };
 
 const cleanText = (text) => text.split("\n").filter(l => {
