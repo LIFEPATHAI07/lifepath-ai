@@ -323,10 +323,17 @@ const Fmt = ({ text, color }) => {
     </div>
   );
 };
-
 const ShareCard = ({ pillar, metrics, lastMsg, onClose }) => {
-  const n = (k) => parseInt(metrics[k] || "0", 10);
-  const score = pillar.id === "career" ? n("ATS_SCORE") : pillar.id === "jobs" ? n("AUTHENTICITY_SCORE") : pillar.id === "wealth" ? n("FINANCIAL_HEALTH") : pillar.id === "hustle" ? n("EARNING_SCORE") : pillar.id === "startup" ? n("SUCCESS_SCORE") : n("ATS_SCORE");
+  // Parse metrics from the specific message being shared
+  const msgMetrics = lastMsg ? parseMetrics(lastMsg) : metrics;
+  const n = (k) => parseInt(msgMetrics[k] || metrics[k] || "0", 10);
+  const score = pillar.id === "career" ? (n("ATS_SCORE")||n("SKILL_GAP_SCORE")) : 
+    pillar.id === "jobs" ? n("AUTHENTICITY_SCORE") : 
+    pillar.id === "wealth" ? n("FINANCIAL_HEALTH") : 
+    pillar.id === "hustle" ? n("EARNING_SCORE") : 
+    pillar.id === "startup" ? (n("SUCCESS_SCORE")||n("WINNING_CHANCE")) : 
+    n("ATS_SCORE");
+  const displayScore = score > 0 ? score : "✓";
   const shareText = `🛡️ LifePath AI analyzed my ${pillar.label}!\n\nMy Score: ${score}/100\n\nIndia's first AI Career Bodyguard — completely free!\nWorks in Malayalam + English 🇮🇳\n\nTry it: lifepath-ai-ovrt.vercel.app\n\n#LifePathAI #CareerAdvice #IndiaJobs #Kerala #AITools`;
   const handleShare = () => {
     if (navigator.share) {
