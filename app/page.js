@@ -1,7 +1,6 @@
 "use client";
 import { useState, useRef, useEffect, useCallback } from "react";
 
-// ── STORAGE ────────────────────────────────────────────────────
 const S = {
   get: (k, fb = null) => { try { const d = localStorage.getItem(k); return d ? JSON.parse(d) : fb; } catch { return fb; } },
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
@@ -15,7 +14,6 @@ const getUsage = () => {
   return u;
 };
 
-// ── PILLAR ASSIGNMENT ──────────────────────────────────────────
 const assignPillar = (stage, goal) => {
   if (goal === "get_job" || stage === "looking_job") return "jobs";
   if (goal === "side_hustle" || stage === "side_income") return "hustle";
@@ -24,7 +22,6 @@ const assignPillar = (stage, goal) => {
   return "career";
 };
 
-// ── STREAK ─────────────────────────────────────────────────────
 const getStreak = () => S.get("lp_streak", { count: 0, lastDate: null });
 const updateStreak = () => {
   const today = new Date().toDateString();
@@ -37,7 +34,6 @@ const updateStreak = () => {
   return u;
 };
 
-// ── PILLARS ────────────────────────────────────────────────────
 const PILLARS = [
   { id: "career", icon: "🛡️", label: "Career Guard", sub: "AI Threats · Skill Gaps · Growth", color: "#6366f1", rgb: "99,102,241" },
   { id: "cv", icon: "📄", label: "CV Builder", sub: "ATS Score · Build · Upload", color: "#06b6d4", rgb: "6,182,212" },
@@ -61,6 +57,35 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone }) => {
   const [done, setDone] = useState(false);
   if (!data) return null;
 
+  const renderGuidance = (guidance) => {
+    if (!guidance) return null;
+    const lines = guidance.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+    return lines.map((line, i) => {
+      const isNumbered = /^\d+[.)]\s/.test(line);
+      const num = isNumbered ? line.match(/^\d+/)?.[0] : null;
+      const text = isNumbered ? line.replace(/^\d+[.)]\s/, "") : line;
+      const isSuccess = line.toLowerCase().startsWith("success");
+      return (
+        <div key={i} style={{ display: "flex", gap: 12, marginBottom: 14, alignItems: "flex-start" }}>
+          {isNumbered ? (
+            <div style={{ width: 24, height: 24, borderRadius: "50%", background: `rgba(${pillar.rgb},.15)`, border: `1px solid rgba(${pillar.rgb},.35)`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>
+              <span style={{ color: pillar.color, fontSize: 11, fontWeight: 800 }}>{num}</span>
+            </div>
+          ) : isSuccess ? (
+            <div style={{ width: 24, height: 24, borderRadius: "50%", background: "rgba(16,185,129,.15)", border: "1px solid rgba(16,185,129,.3)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>
+              <span style={{ fontSize: 11 }}>✅</span>
+            </div>
+          ) : (
+            <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#334155", flexShrink: 0, marginTop: 8 }} />
+          )}
+          <div style={{ color: isSuccess ? "#10b981" : "#94a3b8", fontSize: 13, lineHeight: 1.7, flex: 1, fontWeight: isSuccess ? 600 : 400 }}>
+            {text}
+          </div>
+        </div>
+      );
+    });
+  };
+
   return (
     <div style={{ background: "rgba(255,255,255,.025)", border: `1px solid rgba(${pillar.rgb},.2)`, borderRadius: 20, overflow: "hidden", marginBottom: 4 }}>
 
@@ -74,7 +99,7 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone }) => {
         </div>
       </div>
 
-      {/* Context — real market info */}
+      {/* Context */}
       {data.context && (
         <div style={{ padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,.05)" }}>
           <div style={{ color: "#475569", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 8 }}>
@@ -86,7 +111,7 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone }) => {
         </div>
       )}
 
-      {/* Insight — WOW moment */}
+      {/* Insight */}
       {data.insight && (
         <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,.05)", background: "rgba(6,182,212,.03)" }}>
           <div style={{ color: "#475569", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 6 }}>
@@ -108,7 +133,7 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone }) => {
             {data.task}
           </div>
           {data.why_this_task && (
-            <div style={{ color: "#64748b", fontSize: 12, lineHeight: 1.6, marginBottom: data.task_link ? 14 : 0 }}>
+            <div style={{ color: "#64748b", fontSize: 12, lineHeight: 1.6 }}>
               <span style={{ color: "#475569", fontWeight: 600 }}>Why for you: </span>
               {data.why_this_task}
             </div>
@@ -118,34 +143,15 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone }) => {
 
       {/* Guidance — HOW TO DO IT */}
       {data.guidance && (
-        <div style={{ padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,.05)", background: "rgba(255,255,255,.01)" }}>
-          <div style={{ color: "#475569", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 10 }}>
+        <div style={{ padding: "16px 16px", borderBottom: "1px solid rgba(255,255,255,.05)" }}>
+          <div style={{ color: "#475569", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 14 }}>
             📋 HOW TO DO IT
           </div>
-          <div style={{ color: "#94a3b8", fontSize: 13, lineHeight: 1.9 }}>
-            {data.guidance.split(/\n|\. (?=\d)/).map((step, i) => {
-              const t = step.trim();
-              if (!t) return null;
-              const isStep = /^\d+[.)]\s/.test(t);
-              return (
-                <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                  {isStep && (
-                    <span style={{ color: "#06b6d4", fontWeight: 700, fontSize: 11, flexShrink: 0, marginTop: 2 }}>
-                      {t.match(/^\d+/)?.[0]}.
-                    </span>
-                  )}
-                  <span style={{ lineHeight: 1.7 }}>
-                    {isStep ? t.replace(/^\d+[.)]\s/, "") : t}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-          {/* Action button */}
+          {renderGuidance(data.guidance)}
           {data.task_link && (
-            <div style={{ marginTop: 12 }}>
+            <div style={{ marginTop: 6 }}>
               <a href={data.task_link} target="_blank" rel="noopener noreferrer"
-                style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "10px 20px", background: `linear-gradient(135deg,${pillar.color},${pillar.color}99)`, borderRadius: 100, color: "#fff", fontSize: 13, fontWeight: 700, textDecoration: "none", boxShadow: `0 4px 16px rgba(${pillar.rgb},.3)` }}>
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "11px 22px", background: `linear-gradient(135deg,${pillar.color},${pillar.color}99)`, borderRadius: 100, color: "#fff", fontSize: 13, fontWeight: 700, textDecoration: "none", boxShadow: `0 4px 16px rgba(${pillar.rgb},.3)` }}>
                 {data.task_link_label || "Do This Now"} →
               </a>
             </div>
@@ -162,15 +168,13 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone }) => {
         </div>
       )}
 
-      {/* Done button */}
+      {/* Done */}
       {data.task && (
         <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,.05)" }}>
           {!done ? (
             <button
               onClick={() => { setDone(true); onTaskDone?.(); }}
-              style={{ width: "100%", padding: "13px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, color: "#64748b", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit", transition: "all .2s" }}
-              onMouseEnter={e => { e.target.style.background = "rgba(16,185,129,0.08)"; e.target.style.borderColor = "rgba(16,185,129,0.3)"; e.target.style.color = "#10b981"; }}
-              onMouseLeave={e => { e.target.style.background = "rgba(255,255,255,0.04)"; e.target.style.borderColor = "rgba(255,255,255,0.08)"; e.target.style.color = "#64748b"; }}>
+              style={{ width: "100%", padding: "13px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, color: "#64748b", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
               ✓ Mark as Done
             </button>
           ) : (
@@ -179,11 +183,9 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone }) => {
                 ✅ Task Completed! Amazing work! 🔥
               </div>
               <div style={{ padding: "13px 14px", background: "rgba(6,182,212,.05)", border: "1px solid rgba(6,182,212,.15)", borderRadius: 12 }}>
-                <div style={{ color: "#06b6d4", fontSize: 11, fontWeight: 700, marginBottom: 5 }}>
-                  💬 Tell me how it went
-                </div>
+                <div style={{ color: "#06b6d4", fontSize: 11, fontWeight: 700, marginBottom: 5 }}>💬 Tell me how it went</div>
                 <div style={{ color: "#94a3b8", fontSize: 12, lineHeight: 1.6 }}>
-                  What happened when you tried? Type below — I'll give you your next personalized task.
+                  What happened when you tried? Type below — I'll give you your next task.
                 </div>
               </div>
             </div>
@@ -194,24 +196,16 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone }) => {
       {/* Next step */}
       {data.next_step && (
         <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,.05)" }}>
-          <div style={{ color: "#475569", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 5 }}>
-            📅 NEXT STEP
-          </div>
-          <div style={{ color: "#64748b", fontSize: 12, lineHeight: 1.6 }}>
-            {data.next_step}
-          </div>
+          <div style={{ color: "#475569", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 5 }}>📅 NEXT STEP</div>
+          <div style={{ color: "#64748b", fontSize: 12, lineHeight: 1.6 }}>{data.next_step}</div>
         </div>
       )}
 
-      {/* Follow up question */}
+      {/* Follow up */}
       {data.needs_more_info && data.follow_up_question && (
         <div style={{ padding: "14px 16px", background: "rgba(6,182,212,.04)", borderBottom: "1px solid rgba(255,255,255,.05)" }}>
-          <div style={{ color: "#06b6d4", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 6 }}>
-            ❓ QUICK QUESTION
-          </div>
-          <div style={{ color: "#e2e8f0", fontSize: 14, fontWeight: 600, lineHeight: 1.5 }}>
-            {data.follow_up_question}
-          </div>
+          <div style={{ color: "#06b6d4", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 6 }}>❓ QUICK QUESTION</div>
+          <div style={{ color: "#e2e8f0", fontSize: 14, fontWeight: 600, lineHeight: 1.5 }}>{data.follow_up_question}</div>
         </div>
       )}
 
@@ -246,12 +240,10 @@ const ShareCard = ({ pillar, task, streak, onClose }) => {
         <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "14px", marginBottom: 16 }}>
           <div style={{ color: "#94a3b8", fontSize: 12, lineHeight: 1.85, whiteSpace: "pre-line" }}>{shareText}</div>
         </div>
-        <button onClick={handleShare}
-          style={{ width: "100%", padding: 14, background: `linear-gradient(135deg,${pillar.color},${pillar.color}99)`, border: "none", borderRadius: 12, color: "#fff", fontWeight: 700, fontSize: 15, cursor: "pointer", marginBottom: 10, fontFamily: "inherit" }}>
+        <button onClick={handleShare} style={{ width: "100%", padding: 14, background: `linear-gradient(135deg,${pillar.color},${pillar.color}99)`, border: "none", borderRadius: 12, color: "#fff", fontWeight: 700, fontSize: 15, cursor: "pointer", marginBottom: 10, fontFamily: "inherit" }}>
           Share on WhatsApp / Instagram 📱
         </button>
-        <button onClick={onClose}
-          style={{ width: "100%", padding: 11, background: "transparent", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, color: "#64748b", fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+        <button onClick={onClose} style={{ width: "100%", padding: 11, background: "transparent", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, color: "#64748b", fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
           Cancel
         </button>
       </div>
@@ -282,12 +274,8 @@ export default function LifePathAI() {
   const fileRef = useRef(null);
   const pdfJsLoaded = useRef(false);
 
-  const fireToast = useCallback((msg) => {
-    setToast(msg);
-    setTimeout(() => setToast(""), 3500);
-  }, []);
+  const fireToast = useCallback((msg) => { setToast(msg); setTimeout(() => setToast(""), 3500); }, []);
 
-  // ── SPLASH SEQUENCE ──────────────────────────────────────────
   useEffect(() => {
     const ts = [
       setTimeout(() => setPhase(1), 300),
@@ -305,72 +293,49 @@ export default function LifePathAI() {
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, loading]);
   useEffect(() => { if (Object.keys(messages).length > 0) S.set("lp_chat_history", messages); }, [messages]);
 
-  // ── COMPLETE ONBOARDING ──────────────────────────────────────
   const completeOnboarding = async () => {
     setAnalyzing(true);
     await new Promise(r => setTimeout(r, 2500));
     const assignedId = assignPillar(onboardData.stage, onboardData.goal);
-    const assignedPillar = PILLARS.find(p => p.id === assignedId) || PILLARS[0];
-    const newProfile = {
-      name: onboardData.name,
-      stage: onboardData.stage,
-      goal: onboardData.goal,
-      assignedPillar: assignedId,
-    };
+    const ap = PILLARS.find(p => p.id === assignedId) || PILLARS[0];
+    const newProfile = { name: onboardData.name, stage: onboardData.stage, goal: onboardData.goal, assignedPillar: assignedId };
     setProfile(newProfile);
     S.set("lp_profile", newProfile);
     S.set("lp_onboarded", true);
     setOnboarded(true);
-    const newStreak = updateStreak();
-    setStreak(newStreak.count);
+    const ns = updateStreak();
+    setStreak(ns.count);
     setAnalyzing(false);
-    setPillar(assignedPillar);
-
+    setPillar(ap);
     const opening = {
-      role: "assistant",
-      content: null,
+      role: "assistant", content: null,
       structured: {
-        summary: `Hi ${onboardData.name}! Welcome to ${assignedPillar.label} 🛡️`,
-        context: "",
-        insight: "",
-        task: null,
-        guidance: null,
-        why_this_task: null,
-        task_link: null,
-        task_link_label: null,
-        motivation: null,
-        next_step: null,
-        needs_more_info: true,
-        follow_up_question: `Tell me about yourself — why did you choose ${assignedPillar.label}? What's your situation right now?\n\nThe more you share, the more personal my help will be. 🙏`,
+        summary: `Hi ${onboardData.name}! Welcome to ${ap.label} 🛡️`,
+        context: "", insight: "", task: null, guidance: null,
+        why_this_task: null, task_link: null, task_link_label: null,
+        motivation: null, next_step: null, needs_more_info: true,
+        follow_up_question: `Tell me about yourself — why did you choose ${ap.label}? What's your situation right now?\n\nThe more you share, the more personal my help will be. 🙏`,
       }
     };
     setMessages(m => ({ ...m, [assignedId]: [opening] }));
     setScreen("chat");
   };
 
-  // ── PDF LOADER ───────────────────────────────────────────────
   const loadPdfJs = async () => {
     if (pdfJsLoaded.current && window.pdfjsLib) return true;
     return new Promise((resolve) => {
       const script = document.createElement("script");
       script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
-      script.onload = () => {
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-        pdfJsLoaded.current = true;
-        resolve(true);
-      };
+      script.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"; pdfJsLoaded.current = true; resolve(true); };
       script.onerror = () => resolve(false);
       document.head.appendChild(script);
     });
   };
 
-  // ── FILE UPLOAD ──────────────────────────────────────────────
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (fileRef.current) fileRef.current.value = "";
-
     if (file.name.toLowerCase().endsWith(".pdf")) {
       fireToast("📄 Reading PDF...");
       try {
@@ -384,71 +349,42 @@ export default function LifePathAI() {
           const content = await page.getTextContent();
           fullText += content.items.map(item => item.str).join(" ") + "\n";
         }
-        if (fullText.trim().length > 80) {
-          setCvFile({ name: file.name });
-          setInput(`Please analyze this CV:\n\n${fullText.substring(0, 3000)}`);
-          fireToast("✅ PDF read! Press send.");
-        } else throw new Error("failed");
-      } catch {
-        fireToast("⚠️ Can't read PDF. Please paste CV text.");
-        setInput("My CV:\nName: \nEducation: \nExperience: \nSkills: \nTarget Job: ");
-      }
+        if (fullText.trim().length > 80) { setCvFile({ name: file.name }); setInput(`Please analyze this CV:\n\n${fullText.substring(0, 3000)}`); fireToast("✅ PDF read! Press send."); }
+        else throw new Error("failed");
+      } catch { fireToast("⚠️ Can't read PDF. Please paste CV text."); setInput("My CV:\nName: \nEducation: \nExperience: \nSkills: \nTarget Job: "); }
       return;
     }
-
     const reader = new FileReader();
     reader.onload = (ev) => {
       const text = ev.target.result;
-      if (!text || text.startsWith("%PDF") || text.trim().length < 30) {
-        fireToast("⚠️ Can't read file. Paste CV text.");
-        return;
-      }
-      setCvFile({ name: file.name });
-      setInput(`Analyze this CV:\n\n${text.substring(0, 3000)}`);
-      fireToast("✅ CV loaded! Press send.");
+      if (!text || text.startsWith("%PDF") || text.trim().length < 30) { fireToast("⚠️ Can't read. Paste CV text."); return; }
+      setCvFile({ name: file.name }); setInput(`Analyze this CV:\n\n${text.substring(0, 3000)}`); fireToast("✅ Loaded!");
     };
     reader.onerror = () => fireToast("⚠️ File error. Paste CV text.");
     reader.readAsText(file);
   };
 
-  // ── SEND MESSAGE ─────────────────────────────────────────────
   const sendMessage = async () => {
     if (!input.trim() || loading || !pillar) return;
     const usage = getUsage();
-    if (usage.count >= FREE_LIMIT) {
-      fireToast("Daily limit reached. Come back tomorrow! 🌅");
-      return;
-    }
-
+    if (usage.count >= FREE_LIMIT) { fireToast("Daily limit reached. Come back tomorrow! 🌅"); return; }
     const userMsg = input.trim();
-    setInput("");
-    setCvFile(null);
-
+    setInput(""); setCvFile(null);
     const prev = messages[pillar.id] || [];
-
-    // Build clean API messages from history
     const apiMessages = prev
       .filter(m => m.content || m.structured)
       .map(m => ({
         role: m.role,
-        content: m.content || (m.structured
-          ? `[AI Response: ${JSON.stringify({
-              summary: m.structured.summary,
-              task: m.structured.task,
-              follow_up_question: m.structured.follow_up_question,
-            })}]`
-          : ""),
+        content: m.content || (m.structured ? `[AI: summary="${m.structured.summary || ""}" task="${m.structured.task || ""}" question="${m.structured.follow_up_question || ""}"]` : ""),
       }))
       .filter(m => m.content);
     apiMessages.push({ role: "user", content: userMsg });
-
     const newMsgs = [...prev, { role: "user", content: userMsg }];
     setMessages(m => ({ ...m, [pillar.id]: newMsgs }));
     setLoading(true);
     S.set("lp_usage", { ...usage, count: usage.count + 1 });
-    const newStreak = updateStreak();
-    setStreak(newStreak.count);
-
+    const ns = updateStreak();
+    setStreak(ns.count);
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -457,31 +393,16 @@ export default function LifePathAI() {
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-
-      const aiMsg = {
-        role: "assistant",
-        content: data.reply || null,
-        structured: data.structured || null,
-      };
+      const aiMsg = { role: "assistant", content: data.reply || null, structured: data.structured || null };
       setMessages(m => ({ ...m, [pillar.id]: [...newMsgs, aiMsg] }));
     } catch (err) {
-      setMessages(m => ({
-        ...m,
-        [pillar.id]: [...newMsgs, {
-          role: "assistant",
-          content: `⚠️ ${err.message || "Connection error. Please retry."}`,
-          structured: null,
-        }]
-      }));
+      setMessages(m => ({ ...m, [pillar.id]: [...newMsgs, { role: "assistant", content: `⚠️ ${err.message || "Connection error. Please retry."}`, structured: null }] }));
     }
     setLoading(false);
   };
 
-  const handleKey = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-  };
+  const handleKey = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } };
 
-  // ── CLEAR CHAT ───────────────────────────────────────────────
   const clearChat = () => {
     if (!pillar) return;
     setMessages(m => { const u = { ...m }; delete u[pillar.id]; S.set("lp_chat_history", u); return u; });
@@ -490,9 +411,8 @@ export default function LifePathAI() {
       const opening = {
         role: "assistant", content: null,
         structured: {
-          summary: `Fresh start! Let's keep going. 🛡️`,
-          context: "", insight: "", task: null, guidance: null,
-          why_this_task: null, task_link: null, task_link_label: null,
+          summary: `Fresh start! Let's keep going. 🛡️`, context: "", insight: "",
+          task: null, guidance: null, why_this_task: null, task_link: null, task_link_label: null,
           motivation: null, next_step: null, needs_more_info: true,
           follow_up_question: `What's your situation with ${pillar.label} right now? Tell me anything — the more you share, the better I can help. 🙏`,
         }
@@ -501,17 +421,14 @@ export default function LifePathAI() {
     }, 100);
   };
 
-  // ── SWITCH PILLAR ────────────────────────────────────────────
   const switchPillar = (p) => {
-    setPillar(p);
-    setShowAllPillars(false);
+    setPillar(p); setShowAllPillars(false);
     if (!messages[p.id] || messages[p.id].length === 0) {
       const opening = {
         role: "assistant", content: null,
         structured: {
-          summary: `Switched to ${p.label}! 🛡️`,
-          context: "", insight: "", task: null, guidance: null,
-          why_this_task: null, task_link: null, task_link_label: null,
+          summary: `Switched to ${p.label}! 🛡️`, context: "", insight: "",
+          task: null, guidance: null, why_this_task: null, task_link: null, task_link_label: null,
           motivation: null, next_step: null, needs_more_info: true,
           follow_up_question: `Tell me about yourself — why ${p.label}? What's your situation right now? The more you share, the more specific I can be. 🙏`,
         }
@@ -521,16 +438,14 @@ export default function LifePathAI() {
     setScreen("chat");
   };
 
-  // ── TASK DONE ────────────────────────────────────────────────
   const handleTaskDone = (pillarId) => {
     const followUp = {
       role: "assistant", content: null,
       structured: {
-        summary: "Amazing — you completed your task! 🎉",
-        context: "", insight: "", task: null, guidance: null,
-        why_this_task: null, task_link: null, task_link_label: null,
+        summary: "Amazing — you completed your task! 🎉", context: "", insight: "",
+        task: null, guidance: null, why_this_task: null, task_link: null, task_link_label: null,
         motivation: null, next_step: null, needs_more_info: true,
-        follow_up_question: "Tell me how it went — what happened when you tried? Tell me anything — good or bad — and I'll give you your next personalized task. 💪",
+        follow_up_question: "Tell me how it went — what happened when you tried? Good or bad — I'll give you your next personalized task based on your experience. 💪",
       }
     };
     setMessages(m => ({ ...m, [pillarId]: [...(m[pillarId] || []), followUp] }));
@@ -540,7 +455,6 @@ export default function LifePathAI() {
   const STREAK_MILESTONES = [3, 5, 7, 14, 30];
   const nextMilestone = STREAK_MILESTONES.find(m => m > streak) || 30;
 
-  // ── CSS ──────────────────────────────────────────────────────
   const CSS = `
     @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap');
     *{box-sizing:border-box;margin:0;padding:0}
@@ -569,19 +483,15 @@ export default function LifePathAI() {
     <div style={{ minHeight: "100vh", background: "#060b14", fontFamily: "'Syne','Segoe UI',sans-serif", maxWidth: 480, margin: "0 auto", display: "flex", flexDirection: "column", position: "relative", overflowX: "hidden" }}>
       <style>{CSS}</style>
 
-      {/* TOAST */}
       {toast && (
-        <div style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", background: "rgba(6,11,20,.96)", border: "1px solid rgba(6,182,212,.4)", backdropFilter: "blur(20px)", borderRadius: 100, padding: "9px 22px", color: "#06b6d4", fontSize: 12, fontWeight: 700, zIndex: 700, whiteSpace: "nowrap", animation: "toastIn .3s both", boxShadow: "0 4px 20px rgba(6,182,212,.15)" }}>
+        <div style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", background: "rgba(6,11,20,.96)", border: "1px solid rgba(6,182,212,.4)", backdropFilter: "blur(20px)", borderRadius: 100, padding: "9px 22px", color: "#06b6d4", fontSize: 12, fontWeight: 700, zIndex: 700, whiteSpace: "nowrap", animation: "toastIn .3s both" }}>
           {toast}
         </div>
       )}
 
-      {/* SHARE MODAL */}
-      {shareData && pillar && (
-        <ShareCard pillar={pillar} task={shareData} streak={streak} onClose={() => setShareData(null)} />
-      )}
+      {shareData && pillar && <ShareCard pillar={pillar} task={shareData} streak={streak} onClose={() => setShareData(null)} />}
 
-      {/* ── SPLASH ─────────────────────────────────────────────── */}
+      {/* SPLASH */}
       {screen === "splash" && (
         <div style={{ position: "fixed", inset: 0, background: "#060b14", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 300 }}>
           <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
@@ -589,47 +499,34 @@ export default function LifePathAI() {
           </div>
           <div style={{ position: "absolute", width: 360, height: 360, borderRadius: "50%", background: "radial-gradient(circle,rgba(6,182,212,.06) 0%,transparent 70%)", animation: phase >= 1 ? "glow 3s ease infinite" : "none" }} />
           <div style={{ animation: phase >= 1 ? "brandIn .9s cubic-bezier(.34,1.4,.64,1) both" : "none", textAlign: "center", zIndex: 1, marginBottom: 12 }}>
-            <div style={{ fontSize: 52, fontWeight: 900, color: "#fff", letterSpacing: "-2px" }}>
-              LifePath <span style={{ color: "#06b6d4" }}>AI</span>
-            </div>
+            <div style={{ fontSize: 52, fontWeight: 900, color: "#fff", letterSpacing: "-2px" }}>LifePath <span style={{ color: "#06b6d4" }}>AI</span></div>
           </div>
           <div style={{ animation: phase >= 2 ? "fadeUp .6s both" : "none", opacity: phase >= 2 ? 1 : 0, zIndex: 1 }}>
-            <div style={{ color: "#0d2535", fontSize: 11, letterSpacing: "0.2em", fontFamily: "'JetBrains Mono',monospace" }}>
-              YOUR GROWTH COMPANION · ALWAYS WITH YOU
-            </div>
+            <div style={{ color: "#0d2535", fontSize: 11, letterSpacing: "0.2em", fontFamily: "'JetBrains Mono',monospace" }}>YOUR GROWTH COMPANION · ALWAYS WITH YOU</div>
           </div>
           <div style={{ marginTop: 70, display: "flex", gap: 9, animation: phase >= 1 ? "fadeIn .5s 1s both" : "none" }}>
-            {[0,1,2].map(i => (
-              <div key={i} style={{ width: 5, height: 5, borderRadius: "50%", background: "#06b6d4", animation: `dot 1.5s ${i*.25}s infinite` }} />
-            ))}
+            {[0,1,2].map(i => <div key={i} style={{ width: 5, height: 5, borderRadius: "50%", background: "#06b6d4", animation: `dot 1.5s ${i*.25}s infinite` }} />)}
           </div>
         </div>
       )}
 
-      {/* ── WELCOME ────────────────────────────────────────────── */}
+      {/* WELCOME */}
       {screen === "welcome" && (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", zIndex: 1 }}>
           <div style={{ width: "100%", background: "#0a1020", borderRadius: "24px 24px 0 0", padding: "32px 22px 48px", border: "1px solid rgba(255,255,255,0.07)" }}>
             <div style={{ fontSize: 38, marginBottom: 14, textAlign: "center" }}>🛡️</div>
-            <div style={{ color: "#fff", fontWeight: 900, fontSize: 22, marginBottom: 8, textAlign: "center" }}>
-              Welcome to LifePath AI
-            </div>
+            <div style={{ color: "#fff", fontWeight: 900, fontSize: 22, marginBottom: 8, textAlign: "center" }}>Welcome to LifePath AI</div>
             <div style={{ color: "#64748b", fontSize: 13, lineHeight: 1.7, marginBottom: 22, textAlign: "center" }}>
               Your daily AI growth companion 🇮🇳<br />Free forever · Malayalam + English
             </div>
             <div style={{ background: "rgba(245,158,11,0.07)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: 14, padding: "14px 16px", marginBottom: 22 }}>
               <div style={{ color: "#f59e0b", fontSize: 11, fontWeight: 700, marginBottom: 7 }}>⚠️ DISCLAIMER</div>
-              <div style={{ color: "#94a3b8", fontSize: 12, lineHeight: 1.7 }}>
-                General guidance only — not professional financial, legal, or career advice. Always consult qualified professionals for major decisions.
-              </div>
+              <div style={{ color: "#94a3b8", fontSize: 12, lineHeight: 1.7 }}>General guidance only — not professional financial, legal, or career advice. Always consult qualified professionals for major decisions.</div>
             </div>
             <div style={{ color: "#475569", fontSize: 11, marginBottom: 22, textAlign: "center" }}>
-              Continuing means you agree to our{" "}
-              <a href="/terms" style={{ color: "#06b6d4" }}>Terms</a> and{" "}
-              <a href="/privacy" style={{ color: "#06b6d4" }}>Privacy Policy</a>
+              Continuing means you agree to our <a href="/terms" style={{ color: "#06b6d4" }}>Terms</a> and <a href="/privacy" style={{ color: "#06b6d4" }}>Privacy Policy</a>
             </div>
-            <button className="btn"
-              onClick={() => { setAccepted(true); S.set("lp_accepted", true); setScreen("onboard"); }}
+            <button className="btn" onClick={() => { setAccepted(true); S.set("lp_accepted", true); setScreen("onboard"); }}
               style={{ width: "100%", padding: 16, background: "linear-gradient(135deg,#06b6d4,#0891b2)", border: "none", borderRadius: 14, color: "#fff", fontWeight: 800, fontSize: 16 }}>
               Start My Growth Journey 🚀
             </button>
@@ -637,13 +534,11 @@ export default function LifePathAI() {
         </div>
       )}
 
-      {/* ── ONBOARDING ─────────────────────────────────────────── */}
+      {/* ONBOARDING */}
       {screen === "onboard" && !analyzing && (
         <div style={{ flex: 1, overflowY: "auto", padding: "40px 20px 60px", zIndex: 1 }}>
           <div style={{ textAlign: "center", marginBottom: 28 }}>
-            <div style={{ fontSize: 36, marginBottom: 10 }}>
-              {onboardStep === 0 ? "👋" : onboardStep === 1 ? "📍" : "🎯"}
-            </div>
+            <div style={{ fontSize: 36, marginBottom: 10 }}>{onboardStep === 0 ? "👋" : onboardStep === 1 ? "📍" : "🎯"}</div>
             <div style={{ color: "#fff", fontWeight: 900, fontSize: 20, marginBottom: 6 }}>
               {onboardStep === 0 ? "What's your name?" : onboardStep === 1 ? "What stage are you at?" : "What's your biggest goal?"}
             </div>
@@ -655,16 +550,11 @@ export default function LifePathAI() {
 
           {onboardStep === 0 && (
             <div>
-              <input
-                value={onboardData.name}
-                onChange={e => setOnboardData(d => ({ ...d, name: e.target.value }))}
-                placeholder="Type your name..."
-                autoFocus
+              <input value={onboardData.name} onChange={e => setOnboardData(d => ({ ...d, name: e.target.value }))}
+                placeholder="Type your name..." autoFocus
                 onKeyDown={e => { if (e.key === "Enter" && onboardData.name.trim()) setOnboardStep(1); }}
-                style={{ width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(6,182,212,0.3)", borderRadius: 14, padding: "16px 18px", color: "#e2e8f0", fontSize: 16, outline: "none", marginBottom: 20 }}
-              />
-              <button className="btn"
-                onClick={() => { if (onboardData.name.trim()) setOnboardStep(1); }}
+                style={{ width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(6,182,212,0.3)", borderRadius: 14, padding: "16px 18px", color: "#e2e8f0", fontSize: 16, outline: "none", marginBottom: 20 }} />
+              <button className="btn" onClick={() => { if (onboardData.name.trim()) setOnboardStep(1); }}
                 disabled={!onboardData.name.trim()}
                 style={{ width: "100%", padding: 15, background: onboardData.name.trim() ? "linear-gradient(135deg,#06b6d4,#0891b2)" : "rgba(255,255,255,0.05)", border: "none", borderRadius: 14, color: onboardData.name.trim() ? "#fff" : "#334155", fontWeight: 700, fontSize: 15 }}>
                 Next →
@@ -682,8 +572,7 @@ export default function LifePathAI() {
                 { id: "business", label: "🚀 Starting a business", desc: "Have an idea, want to launch" },
                 { id: "money", label: "💰 Manage money better", desc: "Save, invest, financial freedom" },
               ].map(opt => (
-                <button key={opt.id}
-                  className={`opt ${onboardData.stage === opt.id ? "sel" : ""}`}
+                <button key={opt.id} className={`opt ${onboardData.stage === opt.id ? "sel" : ""}`}
                   onClick={() => { setOnboardData(d => ({ ...d, stage: opt.id })); setTimeout(() => setOnboardStep(2), 250); }}>
                   <div style={{ fontWeight: 700, fontSize: 13 }}>{opt.label}</div>
                   <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>{opt.desc}</div>
@@ -702,8 +591,7 @@ export default function LifePathAI() {
                 { id: "money", label: "💰 Manage money better", desc: "Save, invest, grow wealth" },
                 { id: "protect_career", label: "🛡️ Protect career from AI", desc: "Stay relevant and secure" },
               ].map(opt => (
-                <button key={opt.id}
-                  className={`opt ${onboardData.goal === opt.id ? "sel" : ""}`}
+                <button key={opt.id} className={`opt ${onboardData.goal === opt.id ? "sel" : ""}`}
                   onClick={() => { setOnboardData(d => ({ ...d, goal: opt.id })); setTimeout(completeOnboarding, 250); }}>
                   <div style={{ fontWeight: 700, fontSize: 13 }}>{opt.label}</div>
                   <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>{opt.desc}</div>
@@ -714,20 +602,14 @@ export default function LifePathAI() {
         </div>
       )}
 
-      {/* ── ANALYZING ──────────────────────────────────────────── */}
+      {/* ANALYZING */}
       {analyzing && (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 1, padding: 40 }}>
           <div style={{ fontSize: 48, marginBottom: 20 }}>🛡️</div>
-          <div style={{ color: "#fff", fontWeight: 800, fontSize: 20, marginBottom: 8, textAlign: "center" }}>
-            Analyzing your profile...
-          </div>
-          <div style={{ color: "#475569", fontSize: 13, marginBottom: 30, textAlign: "center" }}>
-            Finding your perfect growth path
-          </div>
+          <div style={{ color: "#fff", fontWeight: 800, fontSize: 20, marginBottom: 8, textAlign: "center" }}>Analyzing your profile...</div>
+          <div style={{ color: "#475569", fontSize: 13, marginBottom: 30, textAlign: "center" }}>Finding your perfect growth path</div>
           {["Reading your goals...", "Finding your best pillar...", "Preparing your experience..."].map((txt, i) => (
-            <div key={i} style={{ color: "#06b6d4", fontSize: 12, marginBottom: 8, animation: `fadeIn .5s ${i*.6}s both`, opacity: 0 }}>
-              ✓ {txt}
-            </div>
+            <div key={i} style={{ color: "#06b6d4", fontSize: 12, marginBottom: 8, animation: `fadeIn .5s ${i*.6}s both`, opacity: 0 }}>✓ {txt}</div>
           ))}
           <div style={{ width: "100%", maxWidth: 280, background: "rgba(255,255,255,0.05)", borderRadius: 100, height: 4, overflow: "hidden", marginTop: 20 }}>
             <div style={{ height: 4, borderRadius: 100, background: "linear-gradient(90deg,#06b6d4,#6366f1)", animation: "analyzing 2.5s ease forwards" }} />
@@ -735,12 +617,11 @@ export default function LifePathAI() {
         </div>
       )}
 
-      {/* ── HOME ───────────────────────────────────────────────── */}
+      {/* HOME */}
       {screen === "home" && (
         <div style={{ flex: 1, overflowY: "auto", zIndex: 1 }}>
           <div style={{ position: "fixed", top: -100, left: "50%", transform: "translateX(-50%)", width: 500, height: 500, borderRadius: "50%", pointerEvents: "none", background: "radial-gradient(circle,rgba(6,182,212,.035) 0%,transparent 65%)" }} />
 
-          {/* Header */}
           <div style={{ padding: "20px 18px 0", display: "flex", justifyContent: "space-between", alignItems: "center", animation: "fadeUp .4s both" }}>
             <div>
               <span style={{ fontSize: 22, fontWeight: 900, color: "#fff", letterSpacing: "-0.8px" }}>LifePath </span>
@@ -750,8 +631,7 @@ export default function LifePathAI() {
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               {streak > 0 && (
                 <div style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 100, padding: "5px 12px", display: "flex", alignItems: "center", gap: 5 }}>
-                  <span>🔥</span>
-                  <span style={{ color: "#f59e0b", fontWeight: 700, fontSize: 13 }}>{streak}</span>
+                  <span>🔥</span><span style={{ color: "#f59e0b", fontWeight: 700, fontSize: 13 }}>{streak}</span>
                 </div>
               )}
               <button className="btn"
@@ -762,7 +642,6 @@ export default function LifePathAI() {
             </div>
           </div>
 
-          {/* Active Pillar Card */}
           {profile.assignedPillar && (() => {
             const ap = PILLARS.find(p => p.id === profile.assignedPillar) || PILLARS[0];
             return (
@@ -791,12 +670,11 @@ export default function LifePathAI() {
                         <span style={{ color: ap.color, fontSize: 10, fontWeight: 600 }}>{streak}/{nextMilestone}</span>
                       </div>
                       <div style={{ background: "rgba(255,255,255,0.08)", borderRadius: 100, height: 5 }}>
-                        <div style={{ height: 5, borderRadius: 100, width: `${Math.min((streak/nextMilestone)*100, 100)}%`, background: `linear-gradient(90deg,${ap.color}88,${ap.color})`, transition: "width .8s ease", boxShadow: `0 0 8px ${ap.color}66` }} />
+                        <div style={{ height: 5, borderRadius: 100, width: `${Math.min((streak/nextMilestone)*100,100)}%`, background: `linear-gradient(90deg,${ap.color}88,${ap.color})`, transition: "width .8s ease", boxShadow: `0 0 8px ${ap.color}66` }} />
                       </div>
                     </div>
                   )}
-                  <button className="btn"
-                    onClick={() => { setPillar(ap); setScreen("chat"); }}
+                  <button className="btn" onClick={() => { setPillar(ap); setScreen("chat"); }}
                     style={{ width: "100%", padding: "12px", background: ap.color, border: "none", borderRadius: 12, color: "#fff", fontWeight: 700, fontSize: 13, boxShadow: `0 4px 16px rgba(${ap.rgb},.3)` }}>
                     Continue My Journey →
                   </button>
@@ -805,33 +683,24 @@ export default function LifePathAI() {
             );
           })()}
 
-          {/* Streak Milestone */}
           {streak > 0 && STREAK_MILESTONES.includes(streak) && (
             <div style={{ margin: "12px 18px 0", padding: "16px", background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 16 }}>
-              <div style={{ color: "#f59e0b", fontWeight: 800, fontSize: 16, marginBottom: 4 }}>
-                🎉 {streak} Day Milestone!
-              </div>
-              <div style={{ color: "#94a3b8", fontSize: 12, marginBottom: 12, lineHeight: 1.6 }}>
-                Incredible consistency! You're building a real habit. Share your achievement!
-              </div>
-              <button className="btn"
-                onClick={() => {
-                  const text = `🔥 I've used LifePath AI for ${streak} days straight!\n\nMy career is growing daily 📈\n\nTry free: lifepath-ai-ovrt.vercel.app\n\n#LifePathAI #Growth #Kerala`;
-                  if (navigator.share) navigator.share({ title: "LifePath AI", text });
-                  else navigator.clipboard?.writeText(text).then(() => fireToast("Copied! Share on WhatsApp 📱"));
-                }}
-                style={{ padding: "9px 18px", background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 100, color: "#f59e0b", fontSize: 12, fontWeight: 700 }}>
+              <div style={{ color: "#f59e0b", fontWeight: 800, fontSize: 16, marginBottom: 4 }}>🎉 {streak} Day Milestone!</div>
+              <div style={{ color: "#94a3b8", fontSize: 12, marginBottom: 12, lineHeight: 1.6 }}>Incredible consistency! Share your achievement!</div>
+              <button className="btn" onClick={() => {
+                const text = `🔥 I've used LifePath AI for ${streak} days straight!\n\nMy career is growing daily 📈\n\nTry free: lifepath-ai-ovrt.vercel.app\n\n#LifePathAI #Growth #Kerala`;
+                if (navigator.share) navigator.share({ title: "LifePath AI", text });
+                else navigator.clipboard?.writeText(text).then(() => fireToast("Copied! Share on WhatsApp 📱"));
+              }} style={{ padding: "9px 18px", background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 100, color: "#f59e0b", fontSize: 12, fontWeight: 700 }}>
                 Share Streak 📤
               </button>
             </div>
           )}
 
-          {/* Switch Goal */}
           <div style={{ padding: "20px 18px 0" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 13 }}>
               <div style={{ color: "#1e293b", fontSize: 9, fontWeight: 700, letterSpacing: 3 }}>SWITCH GOAL</div>
-              <button className="btn"
-                onClick={() => setShowAllPillars(v => !v)}
+              <button className="btn" onClick={() => setShowAllPillars(v => !v)}
                 style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 100, padding: "4px 12px", color: "#475569", fontSize: 10 }}>
                 {showAllPillars ? "Hide" : "Show all 6 shields"}
               </button>
@@ -839,15 +708,12 @@ export default function LifePathAI() {
             {showAllPillars && (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 {PILLARS.map((p, i) => (
-                  <div key={p.id} className="card"
-                    onClick={() => switchPillar(p)}
+                  <div key={p.id} className="card" onClick={() => switchPillar(p)}
                     style={{ background: profile.assignedPillar === p.id ? `rgba(${p.rgb},.12)` : "rgba(255,255,255,.022)", border: `1px solid ${profile.assignedPillar === p.id ? `rgba(${p.rgb},.4)` : "rgba(255,255,255,.055)"}`, borderRadius: 18, padding: "15px 13px", position: "relative", overflow: "hidden", animation: `fadeUp .4s ${i*.06}s both` }}>
                     <div style={{ width: 36, height: 36, borderRadius: 10, background: `rgba(${p.rgb},.09)`, border: `1px solid rgba(${p.rgb},.2)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, marginBottom: 8 }}>{p.icon}</div>
                     <div style={{ color: "#dde4ee", fontSize: 11, fontWeight: 700, marginBottom: 3 }}>{p.label}</div>
                     <div style={{ color: "#475569", fontSize: 9 }}>{p.sub}</div>
-                    {profile.assignedPillar === p.id && (
-                      <div style={{ position: "absolute", top: 8, right: 8, background: p.color, borderRadius: 100, padding: "1px 7px", fontSize: 7, color: "#fff", fontWeight: 700 }}>ACTIVE</div>
-                    )}
+                    {profile.assignedPillar === p.id && <div style={{ position: "absolute", top: 8, right: 8, background: p.color, borderRadius: 100, padding: "1px 7px", fontSize: 7, color: "#fff", fontWeight: 700 }}>ACTIVE</div>}
                     {messages[p.id]?.filter(m => m.role === "user").length > 0 && profile.assignedPillar !== p.id && (
                       <div style={{ position: "absolute", top: 8, right: 8, background: "#334155", borderRadius: 100, padding: "1px 7px", fontSize: 7, color: "#94a3b8", fontWeight: 700 }}>
                         {messages[p.id].filter(m => m.role === "user").length}
@@ -859,7 +725,6 @@ export default function LifePathAI() {
             )}
           </div>
 
-          {/* Affiliates */}
           <div style={{ padding: "22px 0 0" }}>
             <div style={{ padding: "0 18px 11px", color: "#1e293b", fontSize: 9, fontWeight: 700, letterSpacing: 3 }}>RECOMMENDED FOR YOU</div>
             <div className="sx" style={{ paddingLeft: 18 }}>
@@ -879,12 +744,8 @@ export default function LifePathAI() {
             </div>
           </div>
 
-          {/* Ad placeholder */}
           <div style={{ margin: "20px 18px", padding: 16, background: "rgba(255,255,255,.012)", border: "1px dashed rgba(255,255,255,.05)", borderRadius: 14, textAlign: "center", minHeight: 80, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <div>
-              <div style={{ color: "#1e293b", fontSize: 9, letterSpacing: 2, marginBottom: 4 }}>ADVERTISEMENT</div>
-              <div style={{ color: "#0f172a", fontSize: 9 }}>Google AdSense · 320×90</div>
-            </div>
+            <div><div style={{ color: "#1e293b", fontSize: 9, letterSpacing: 2, marginBottom: 4 }}>ADVERTISEMENT</div><div style={{ color: "#0f172a", fontSize: 9 }}>Google AdSense · 320×90</div></div>
           </div>
 
           <div style={{ textAlign: "center", padding: "0 18px 10px", display: "flex", justifyContent: "center", gap: 20 }}>
@@ -897,20 +758,13 @@ export default function LifePathAI() {
         </div>
       )}
 
-      {/* ── CHAT ───────────────────────────────────────────────── */}
+      {/* CHAT */}
       {screen === "chat" && pillar && (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", zIndex: 1 }}>
-
-          {/* Chat Header */}
           <div style={{ padding: "11px 14px", background: "rgba(6,11,20,.97)", borderBottom: "1px solid rgba(255,255,255,.05)", backdropFilter: "blur(24px)", display: "flex", alignItems: "center", gap: 10, position: "sticky", top: 0, zIndex: 10 }}>
-            <button className="btn"
-              onClick={() => setScreen("home")}
-              style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 11, width: 34, height: 34, color: "#64748b", fontSize: 17, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              ‹
-            </button>
-            <div style={{ width: 30, height: 30, borderRadius: 9, background: `rgba(${pillar.rgb},.1)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>
-              {pillar.icon}
-            </div>
+            <button className="btn" onClick={() => setScreen("home")}
+              style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 11, width: 34, height: 34, color: "#64748b", fontSize: 17, display: "flex", alignItems: "center", justifyContent: "center" }}>‹</button>
+            <div style={{ width: 30, height: 30, borderRadius: 9, background: `rgba(${pillar.rgb},.1)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>{pillar.icon}</div>
             <div style={{ flex: 1 }}>
               <div style={{ color: "#dde4ee", fontWeight: 700, fontSize: 12 }}>{pillar.label}</div>
               <div style={{ color: "#334155", fontSize: 9 }}>{pillar.sub}</div>
@@ -921,22 +775,17 @@ export default function LifePathAI() {
                 <span style={{ color: "#f59e0b", fontWeight: 700, fontSize: 11 }}>{streak}</span>
               </div>
             )}
-            <button className="btn"
-              onClick={clearChat}
-              style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 9, padding: "5px 9px", color: "#475569", fontSize: 9 }}>
-              Clear
-            </button>
+            <button className="btn" onClick={clearChat}
+              style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 9, padding: "5px 9px", color: "#475569", fontSize: 9 }}>Clear</button>
             <div style={{ background: "rgba(6,182,212,.07)", border: "1px solid rgba(6,182,212,.2)", borderRadius: 100, padding: "3px 9px", display: "flex", alignItems: "center", gap: 4 }}>
               <div style={{ width: 4, height: 4, borderRadius: "50%", background: "#06b6d4", animation: "pulse 2s infinite" }} />
               <span style={{ color: "#06b6d4", fontSize: 9, fontWeight: 700 }}>LIVE</span>
             </div>
           </div>
 
-          {/* Messages */}
           <div style={{ flex: 1, overflowY: "auto", padding: "16px 13px" }}>
             {curMsgs.map((msg, i) => {
               const isAI = msg.role === "assistant";
-
               if (!isAI) return (
                 <div key={i} style={{ marginBottom: 14, display: "flex", justifyContent: "flex-end", animation: "fadeUp .3s both" }}>
                   <div style={{ background: `linear-gradient(135deg,${pillar.color},${pillar.color}bb)`, borderRadius: "16px 16px 4px 16px", padding: "11px 15px", maxWidth: "82%", color: "#fff", fontSize: 13, lineHeight: 1.65 }}>
@@ -944,7 +793,6 @@ export default function LifePathAI() {
                   </div>
                 </div>
               );
-
               return (
                 <div key={i} style={{ marginBottom: 16, animation: "fadeUp .3s both" }}>
                   {msg.structured ? (
@@ -956,31 +804,23 @@ export default function LifePathAI() {
                     />
                   ) : msg.content ? (
                     <div style={{ background: "rgba(255,255,255,.022)", border: "1px solid rgba(255,255,255,.065)", borderRadius: "4px 16px 16px 16px", padding: "14px", maxWidth: "98%" }}>
-                      <div style={{ color: "#06b6d4", fontSize: 9, letterSpacing: 2.5, fontWeight: 700, marginBottom: 10, fontFamily: "'JetBrains Mono',monospace" }}>
-                        🛡️ LIFEPATH AI
-                      </div>
-                      <div style={{ color: "#94a3b8", fontSize: 13, lineHeight: 1.75, whiteSpace: "pre-wrap" }}>
-                        {msg.content}
-                      </div>
+                      <div style={{ color: "#06b6d4", fontSize: 9, letterSpacing: 2.5, fontWeight: 700, marginBottom: 10, fontFamily: "'JetBrains Mono',monospace" }}>🛡️ LIFEPATH AI</div>
+                      <div style={{ color: "#94a3b8", fontSize: 13, lineHeight: 1.75, whiteSpace: "pre-wrap" }}>{msg.content}</div>
                     </div>
                   ) : null}
                 </div>
               );
             })}
 
-            {/* Loading */}
             {loading && (
               <div style={{ background: "rgba(255,255,255,.022)", border: "1px solid rgba(255,255,255,.065)", borderRadius: "4px 16px 16px 16px", padding: "12px 16px", display: "inline-flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
                 <span style={{ color: "#06b6d4", fontSize: 9, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace" }}>ANALYZING</span>
-                {[0,1,2].map(i => (
-                  <div key={i} style={{ width: 5, height: 5, borderRadius: "50%", background: "#06b6d4", animation: `dot 1.3s ${i*.22}s infinite` }} />
-                ))}
+                {[0,1,2].map(i => <div key={i} style={{ width: 5, height: 5, borderRadius: "50%", background: "#06b6d4", animation: `dot 1.3s ${i*.22}s infinite` }} />)}
               </div>
             )}
             <div ref={bottomRef} />
           </div>
 
-          {/* Input Bar */}
           <div style={{ padding: "10px 13px 28px", background: "rgba(6,11,20,.97)", borderTop: "1px solid rgba(255,255,255,.04)", backdropFilter: "blur(24px)" }}>
             {cvFile && (
               <div style={{ marginBottom: 9, padding: "7px 13px", background: "rgba(6,182,212,.07)", border: "1px solid rgba(6,182,212,.2)", borderRadius: 10, color: "#06b6d4", fontSize: 11, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -992,26 +832,17 @@ export default function LifePathAI() {
               {pillar?.id === "cv" && (
                 <>
                   <input ref={fileRef} type="file" accept=".txt,.doc,.docx,.pdf" onChange={handleFileUpload} style={{ display: "none" }} />
-                  <button className="btn"
-                    onClick={() => fileRef.current?.click()}
-                    style={{ width: 44, height: 44, borderRadius: 13, flexShrink: 0, background: "rgba(6,182,212,.08)", border: "1px solid rgba(6,182,212,.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19 }}>
-                    📎
-                  </button>
+                  <button className="btn" onClick={() => fileRef.current?.click()}
+                    style={{ width: 44, height: 44, borderRadius: 13, flexShrink: 0, background: "rgba(6,182,212,.08)", border: "1px solid rgba(6,182,212,.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19 }}>📎</button>
                 </>
               )}
-              <textarea
-                value={input}
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={handleKey}
+              <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKey}
                 placeholder="Tell me about yourself or ask anything..."
                 rows={2}
                 style={{ flex: 1, background: "rgba(255,255,255,.03)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 14, padding: "11px 13px", color: "#e2e8f0", fontSize: 13, resize: "none", lineHeight: 1.55, transition: "border-color .2s" }}
                 onFocus={e => e.target.style.borderColor = pillar.color + "66"}
-                onBlur={e => e.target.style.borderColor = "rgba(255,255,255,.07)"}
-              />
-              <button className="btn"
-                onClick={sendMessage}
-                disabled={loading || !input.trim()}
+                onBlur={e => e.target.style.borderColor = "rgba(255,255,255,.07)"} />
+              <button className="btn" onClick={sendMessage} disabled={loading || !input.trim()}
                 style={{ width: 44, height: 44, borderRadius: 13, flexShrink: 0, background: loading || !input.trim() ? "rgba(255,255,255,.04)" : `linear-gradient(135deg,${pillar.color},${pillar.color}88)`, border: "none", cursor: loading || !input.trim() ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19, boxShadow: !loading && input.trim() ? `0 4px 16px rgba(${pillar.rgb},.3)` : "none" }}>
                 {loading ? "⏳" : "↑"}
               </button>
