@@ -74,7 +74,7 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone }) => {
         </div>
       </div>
 
-      {/* Context */}
+      {/* Context — real market info */}
       {data.context && (
         <div style={{ padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,.05)" }}>
           <div style={{ color: "#475569", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 8 }}>
@@ -86,7 +86,7 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone }) => {
         </div>
       )}
 
-      {/* Insight */}
+      {/* Insight — WOW moment */}
       {data.insight && (
         <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,.05)", background: "rgba(6,182,212,.03)" }}>
           <div style={{ color: "#475569", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 6 }}>
@@ -108,16 +108,47 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone }) => {
             {data.task}
           </div>
           {data.why_this_task && (
-            <div style={{ color: "#64748b", fontSize: 12, lineHeight: 1.6, marginBottom: 14 }}>
+            <div style={{ color: "#64748b", fontSize: 12, lineHeight: 1.6, marginBottom: data.task_link ? 14 : 0 }}>
               <span style={{ color: "#475569", fontWeight: 600 }}>Why for you: </span>
               {data.why_this_task}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Guidance — HOW TO DO IT */}
+      {data.guidance && (
+        <div style={{ padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,.05)", background: "rgba(255,255,255,.01)" }}>
+          <div style={{ color: "#475569", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 10 }}>
+            📋 HOW TO DO IT
+          </div>
+          <div style={{ color: "#94a3b8", fontSize: 13, lineHeight: 1.9 }}>
+            {data.guidance.split(/\n|\. (?=\d)/).map((step, i) => {
+              const t = step.trim();
+              if (!t) return null;
+              const isStep = /^\d+[.)]\s/.test(t);
+              return (
+                <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                  {isStep && (
+                    <span style={{ color: "#06b6d4", fontWeight: 700, fontSize: 11, flexShrink: 0, marginTop: 2 }}>
+                      {t.match(/^\d+/)?.[0]}.
+                    </span>
+                  )}
+                  <span style={{ lineHeight: 1.7 }}>
+                    {isStep ? t.replace(/^\d+[.)]\s/, "") : t}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          {/* Action button */}
           {data.task_link && (
-            <a href={data.task_link} target="_blank" rel="noopener noreferrer"
-              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "10px 18px", background: `linear-gradient(135deg,${pillar.color},${pillar.color}99)`, borderRadius: 100, color: "#fff", fontSize: 13, fontWeight: 700, textDecoration: "none", boxShadow: `0 4px 16px rgba(${pillar.rgb},.3)` }}>
-              {data.task_link_label || "Do This Now"} →
-            </a>
+            <div style={{ marginTop: 12 }}>
+              <a href={data.task_link} target="_blank" rel="noopener noreferrer"
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "10px 20px", background: `linear-gradient(135deg,${pillar.color},${pillar.color}99)`, borderRadius: 100, color: "#fff", fontSize: 13, fontWeight: 700, textDecoration: "none", boxShadow: `0 4px 16px rgba(${pillar.rgb},.3)` }}>
+                {data.task_link_label || "Do This Now"} →
+              </a>
+            </div>
           )}
         </div>
       )}
@@ -137,20 +168,22 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone }) => {
           {!done ? (
             <button
               onClick={() => { setDone(true); onTaskDone?.(); }}
-              style={{ width: "100%", padding: "12px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, color: "#64748b", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+              style={{ width: "100%", padding: "13px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, color: "#64748b", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit", transition: "all .2s" }}
+              onMouseEnter={e => { e.target.style.background = "rgba(16,185,129,0.08)"; e.target.style.borderColor = "rgba(16,185,129,0.3)"; e.target.style.color = "#10b981"; }}
+              onMouseLeave={e => { e.target.style.background = "rgba(255,255,255,0.04)"; e.target.style.borderColor = "rgba(255,255,255,0.08)"; e.target.style.color = "#64748b"; }}>
               ✓ Mark as Done
             </button>
           ) : (
             <div>
-              <div style={{ padding: "10px", background: "rgba(16,185,129,.08)", border: "1px solid rgba(16,185,129,.2)", borderRadius: 12, color: "#10b981", fontWeight: 700, fontSize: 13, textAlign: "center", marginBottom: 10 }}>
+              <div style={{ padding: "11px", background: "rgba(16,185,129,.08)", border: "1px solid rgba(16,185,129,.2)", borderRadius: 12, color: "#10b981", fontWeight: 700, fontSize: 13, textAlign: "center", marginBottom: 10 }}>
                 ✅ Task Completed! Amazing work! 🔥
               </div>
-              <div style={{ padding: "12px 14px", background: "rgba(6,182,212,.05)", border: "1px solid rgba(6,182,212,.15)", borderRadius: 12 }}>
+              <div style={{ padding: "13px 14px", background: "rgba(6,182,212,.05)", border: "1px solid rgba(6,182,212,.15)", borderRadius: 12 }}>
                 <div style={{ color: "#06b6d4", fontSize: 11, fontWeight: 700, marginBottom: 5 }}>
                   💬 Tell me how it went
                 </div>
                 <div style={{ color: "#94a3b8", fontSize: 12, lineHeight: 1.6 }}>
-                  What happened when you tried? Type below — I'll give you your next task.
+                  What happened when you tried? Type below — I'll give you your next personalized task.
                 </div>
               </div>
             </div>
@@ -213,10 +246,12 @@ const ShareCard = ({ pillar, task, streak, onClose }) => {
         <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "14px", marginBottom: 16 }}>
           <div style={{ color: "#94a3b8", fontSize: 12, lineHeight: 1.85, whiteSpace: "pre-line" }}>{shareText}</div>
         </div>
-        <button onClick={handleShare} style={{ width: "100%", padding: 14, background: `linear-gradient(135deg,${pillar.color},${pillar.color}99)`, border: "none", borderRadius: 12, color: "#fff", fontWeight: 700, fontSize: 15, cursor: "pointer", marginBottom: 10, fontFamily: "inherit" }}>
+        <button onClick={handleShare}
+          style={{ width: "100%", padding: 14, background: `linear-gradient(135deg,${pillar.color},${pillar.color}99)`, border: "none", borderRadius: 12, color: "#fff", fontWeight: 700, fontSize: 15, cursor: "pointer", marginBottom: 10, fontFamily: "inherit" }}>
           Share on WhatsApp / Instagram 📱
         </button>
-        <button onClick={onClose} style={{ width: "100%", padding: 11, background: "transparent", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, color: "#64748b", fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+        <button onClick={onClose}
+          style={{ width: "100%", padding: 11, background: "transparent", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, color: "#64748b", fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
           Cancel
         </button>
       </div>
@@ -252,7 +287,7 @@ export default function LifePathAI() {
     setTimeout(() => setToast(""), 3500);
   }, []);
 
-  // ── SPLASH ───────────────────────────────────────────────────
+  // ── SPLASH SEQUENCE ──────────────────────────────────────────
   useEffect(() => {
     const ts = [
       setTimeout(() => setPhase(1), 300),
@@ -270,7 +305,7 @@ export default function LifePathAI() {
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, loading]);
   useEffect(() => { if (Object.keys(messages).length > 0) S.set("lp_chat_history", messages); }, [messages]);
 
-  // ── ONBOARDING COMPLETE ──────────────────────────────────────
+  // ── COMPLETE ONBOARDING ──────────────────────────────────────
   const completeOnboarding = async () => {
     setAnalyzing(true);
     await new Promise(r => setTimeout(r, 2500));
@@ -291,7 +326,6 @@ export default function LifePathAI() {
     setAnalyzing(false);
     setPillar(assignedPillar);
 
-    // Opening — ask user to share their story
     const opening = {
       role: "assistant",
       content: null,
@@ -300,6 +334,7 @@ export default function LifePathAI() {
         context: "",
         insight: "",
         task: null,
+        guidance: null,
         why_this_task: null,
         task_link: null,
         task_link_label: null,
@@ -313,7 +348,7 @@ export default function LifePathAI() {
     setScreen("chat");
   };
 
-  // ── PDF UPLOAD ───────────────────────────────────────────────
+  // ── PDF LOADER ───────────────────────────────────────────────
   const loadPdfJs = async () => {
     if (pdfJsLoaded.current && window.pdfjsLib) return true;
     return new Promise((resolve) => {
@@ -330,6 +365,7 @@ export default function LifePathAI() {
     });
   };
 
+  // ── FILE UPLOAD ──────────────────────────────────────────────
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -364,13 +400,14 @@ export default function LifePathAI() {
     reader.onload = (ev) => {
       const text = ev.target.result;
       if (!text || text.startsWith("%PDF") || text.trim().length < 30) {
-        fireToast("⚠️ Can't read. Paste CV text.");
+        fireToast("⚠️ Can't read file. Paste CV text.");
         return;
       }
       setCvFile({ name: file.name });
       setInput(`Analyze this CV:\n\n${text.substring(0, 3000)}`);
-      fireToast("✅ Loaded!");
+      fireToast("✅ CV loaded! Press send.");
     };
+    reader.onerror = () => fireToast("⚠️ File error. Paste CV text.");
     reader.readAsText(file);
   };
 
@@ -378,20 +415,31 @@ export default function LifePathAI() {
   const sendMessage = async () => {
     if (!input.trim() || loading || !pillar) return;
     const usage = getUsage();
-    if (usage.count >= FREE_LIMIT) { fireToast("Daily limit reached. Come back tomorrow! 🌅"); return; }
+    if (usage.count >= FREE_LIMIT) {
+      fireToast("Daily limit reached. Come back tomorrow! 🌅");
+      return;
+    }
 
     const userMsg = input.trim();
-    setInput(""); setCvFile(null);
+    setInput("");
+    setCvFile(null);
 
     const prev = messages[pillar.id] || [];
 
-    // Build API messages from history
+    // Build clean API messages from history
     const apiMessages = prev
       .filter(m => m.content || m.structured)
       .map(m => ({
         role: m.role,
-        content: m.content || (m.structured ? JSON.stringify(m.structured) : ""),
-      }));
+        content: m.content || (m.structured
+          ? `[AI Response: ${JSON.stringify({
+              summary: m.structured.summary,
+              task: m.structured.task,
+              follow_up_question: m.structured.follow_up_question,
+            })}]`
+          : ""),
+      }))
+      .filter(m => m.content);
     apiMessages.push({ role: "user", content: userMsg });
 
     const newMsgs = [...prev, { role: "user", content: userMsg }];
@@ -417,11 +465,14 @@ export default function LifePathAI() {
       };
       setMessages(m => ({ ...m, [pillar.id]: [...newMsgs, aiMsg] }));
     } catch (err) {
-      setMessages(m => ({ ...m, [pillar.id]: [...newMsgs, {
-        role: "assistant",
-        content: `⚠️ ${err.message || "Connection error. Please retry."}`,
-        structured: null,
-      }] }));
+      setMessages(m => ({
+        ...m,
+        [pillar.id]: [...newMsgs, {
+          role: "assistant",
+          content: `⚠️ ${err.message || "Connection error. Please retry."}`,
+          structured: null,
+        }]
+      }));
     }
     setLoading(false);
   };
@@ -435,23 +486,19 @@ export default function LifePathAI() {
     if (!pillar) return;
     setMessages(m => { const u = { ...m }; delete u[pillar.id]; S.set("lp_chat_history", u); return u; });
     fireToast("💬 Chat cleared");
-    const opening = {
-      role: "assistant", content: null,
-      structured: {
-        summary: `Ready for a fresh start! 🛡️`,
-        context: "",
-        insight: "",
-        task: null,
-        why_this_task: null,
-        task_link: null,
-        task_link_label: null,
-        motivation: null,
-        next_step: null,
-        needs_more_info: true,
-        follow_up_question: `What's your situation with ${pillar.label} right now? Tell me anything — the more you share, the better I can help.`,
-      }
-    };
-    setMessages(m => ({ ...m, [pillar.id]: [opening] }));
+    setTimeout(() => {
+      const opening = {
+        role: "assistant", content: null,
+        structured: {
+          summary: `Fresh start! Let's keep going. 🛡️`,
+          context: "", insight: "", task: null, guidance: null,
+          why_this_task: null, task_link: null, task_link_label: null,
+          motivation: null, next_step: null, needs_more_info: true,
+          follow_up_question: `What's your situation with ${pillar.label} right now? Tell me anything — the more you share, the better I can help. 🙏`,
+        }
+      };
+      setMessages(m => ({ ...m, [pillar.id]: [opening] }));
+    }, 100);
   };
 
   // ── SWITCH PILLAR ────────────────────────────────────────────
@@ -462,17 +509,11 @@ export default function LifePathAI() {
       const opening = {
         role: "assistant", content: null,
         structured: {
-          summary: `You switched to ${p.label}! 🛡️`,
-          context: "",
-          insight: "",
-          task: null,
-          why_this_task: null,
-          task_link: null,
-          task_link_label: null,
-          motivation: null,
-          next_step: null,
-          needs_more_info: true,
-          follow_up_question: `Tell me about yourself — why did you choose ${p.label}? What's your situation right now?`,
+          summary: `Switched to ${p.label}! 🛡️`,
+          context: "", insight: "", task: null, guidance: null,
+          why_this_task: null, task_link: null, task_link_label: null,
+          motivation: null, next_step: null, needs_more_info: true,
+          follow_up_question: `Tell me about yourself — why ${p.label}? What's your situation right now? The more you share, the more specific I can be. 🙏`,
         }
       };
       setMessages(m => ({ ...m, [p.id]: [opening] }));
@@ -480,23 +521,16 @@ export default function LifePathAI() {
     setScreen("chat");
   };
 
-  // ── TASK DONE HANDLER ────────────────────────────────────────
+  // ── TASK DONE ────────────────────────────────────────────────
   const handleTaskDone = (pillarId) => {
     const followUp = {
-      role: "assistant",
-      content: null,
+      role: "assistant", content: null,
       structured: {
-        summary: "Amazing! You completed your task! 🎉",
-        context: "",
-        insight: "",
-        task: null,
-        why_this_task: null,
-        task_link: null,
-        task_link_label: null,
-        motivation: null,
-        next_step: null,
-        needs_more_info: true,
-        follow_up_question: "Tell me how it went — what happened when you tried? I'll give you your next personalized task based on your experience. 💪",
+        summary: "Amazing — you completed your task! 🎉",
+        context: "", insight: "", task: null, guidance: null,
+        why_this_task: null, task_link: null, task_link_label: null,
+        motivation: null, next_step: null, needs_more_info: true,
+        follow_up_question: "Tell me how it went — what happened when you tried? Tell me anything — good or bad — and I'll give you your next personalized task. 💪",
       }
     };
     setMessages(m => ({ ...m, [pillarId]: [...(m[pillarId] || []), followUp] }));
@@ -537,12 +571,12 @@ export default function LifePathAI() {
 
       {/* TOAST */}
       {toast && (
-        <div style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", background: "rgba(6,11,20,.96)", border: "1px solid rgba(6,182,212,.4)", backdropFilter: "blur(20px)", borderRadius: 100, padding: "9px 22px", color: "#06b6d4", fontSize: 12, fontWeight: 700, zIndex: 700, whiteSpace: "nowrap", animation: "toastIn .3s both" }}>
+        <div style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", background: "rgba(6,11,20,.96)", border: "1px solid rgba(6,182,212,.4)", backdropFilter: "blur(20px)", borderRadius: 100, padding: "9px 22px", color: "#06b6d4", fontSize: 12, fontWeight: 700, zIndex: 700, whiteSpace: "nowrap", animation: "toastIn .3s both", boxShadow: "0 4px 20px rgba(6,182,212,.15)" }}>
           {toast}
         </div>
       )}
 
-      {/* SHARE */}
+      {/* SHARE MODAL */}
       {shareData && pillar && (
         <ShareCard pillar={pillar} task={shareData} streak={streak} onClose={() => setShareData(null)} />
       )}
@@ -594,7 +628,8 @@ export default function LifePathAI() {
               <a href="/terms" style={{ color: "#06b6d4" }}>Terms</a> and{" "}
               <a href="/privacy" style={{ color: "#06b6d4" }}>Privacy Policy</a>
             </div>
-            <button className="btn" onClick={() => { setAccepted(true); S.set("lp_accepted", true); setScreen("onboard"); }}
+            <button className="btn"
+              onClick={() => { setAccepted(true); S.set("lp_accepted", true); setScreen("onboard"); }}
               style={{ width: "100%", padding: 16, background: "linear-gradient(135deg,#06b6d4,#0891b2)", border: "none", borderRadius: 14, color: "#fff", fontWeight: 800, fontSize: 16 }}>
               Start My Growth Journey 🚀
             </button>
@@ -606,15 +641,13 @@ export default function LifePathAI() {
       {screen === "onboard" && !analyzing && (
         <div style={{ flex: 1, overflowY: "auto", padding: "40px 20px 60px", zIndex: 1 }}>
           <div style={{ textAlign: "center", marginBottom: 28 }}>
-            <div style={{ fontSize: 32, marginBottom: 10 }}>
+            <div style={{ fontSize: 36, marginBottom: 10 }}>
               {onboardStep === 0 ? "👋" : onboardStep === 1 ? "📍" : "🎯"}
             </div>
             <div style={{ color: "#fff", fontWeight: 900, fontSize: 20, marginBottom: 6 }}>
               {onboardStep === 0 ? "What's your name?" : onboardStep === 1 ? "What stage are you at?" : "What's your biggest goal?"}
             </div>
-            <div style={{ color: "#334155", fontSize: 11, marginBottom: 16 }}>
-              Step {onboardStep + 1} of 3
-            </div>
+            <div style={{ color: "#334155", fontSize: 11, marginBottom: 16 }}>Step {onboardStep + 1} of 3</div>
             <div style={{ background: "rgba(255,255,255,0.05)", borderRadius: 100, height: 3, overflow: "hidden" }}>
               <div style={{ height: 3, borderRadius: 100, width: `${((onboardStep+1)/3)*100}%`, background: "linear-gradient(90deg,#06b6d4,#6366f1)", transition: "width .4s ease" }} />
             </div>
@@ -649,7 +682,8 @@ export default function LifePathAI() {
                 { id: "business", label: "🚀 Starting a business", desc: "Have an idea, want to launch" },
                 { id: "money", label: "💰 Manage money better", desc: "Save, invest, financial freedom" },
               ].map(opt => (
-                <button key={opt.id} className={`opt ${onboardData.stage === opt.id ? "sel" : ""}`}
+                <button key={opt.id}
+                  className={`opt ${onboardData.stage === opt.id ? "sel" : ""}`}
                   onClick={() => { setOnboardData(d => ({ ...d, stage: opt.id })); setTimeout(() => setOnboardStep(2), 250); }}>
                   <div style={{ fontWeight: 700, fontSize: 13 }}>{opt.label}</div>
                   <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>{opt.desc}</div>
@@ -668,7 +702,8 @@ export default function LifePathAI() {
                 { id: "money", label: "💰 Manage money better", desc: "Save, invest, grow wealth" },
                 { id: "protect_career", label: "🛡️ Protect career from AI", desc: "Stay relevant and secure" },
               ].map(opt => (
-                <button key={opt.id} className={`opt ${onboardData.goal === opt.id ? "sel" : ""}`}
+                <button key={opt.id}
+                  className={`opt ${onboardData.goal === opt.id ? "sel" : ""}`}
                   onClick={() => { setOnboardData(d => ({ ...d, goal: opt.id })); setTimeout(completeOnboarding, 250); }}>
                   <div style={{ fontWeight: 700, fontSize: 13 }}>{opt.label}</div>
                   <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>{opt.desc}</div>
@@ -727,7 +762,7 @@ export default function LifePathAI() {
             </div>
           </div>
 
-          {/* Active pillar card */}
+          {/* Active Pillar Card */}
           {profile.assignedPillar && (() => {
             const ap = PILLARS.find(p => p.id === profile.assignedPillar) || PILLARS[0];
             return (
@@ -736,32 +771,33 @@ export default function LifePathAI() {
                   Welcome back, <strong style={{ color: "#e2e8f0" }}>{profile.name?.split(" ")[0]}</strong>! 👋
                 </div>
                 <div style={{ padding: "18px 16px", background: `linear-gradient(135deg,rgba(${ap.rgb},.1),rgba(${ap.rgb},.05))`, border: `1px solid rgba(${ap.rgb},.25)`, borderRadius: 18 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
                     <div>
                       <div style={{ color: ap.color, fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 4 }}>YOUR ACTIVE SHIELD</div>
                       <div style={{ color: "#fff", fontWeight: 800, fontSize: 16 }}>{ap.icon} {ap.label}</div>
+                      <div style={{ color: "#475569", fontSize: 11, marginTop: 3 }}>{ap.sub}</div>
                     </div>
                     {streak > 0 && (
-                      <div style={{ textAlign: "right" }}>
-                        <div style={{ color: "#f59e0b", fontSize: 22, fontWeight: 800 }}>🔥 {streak}</div>
-                        <div style={{ color: "#64748b", fontSize: 9 }}>day streak</div>
+                      <div style={{ textAlign: "right", background: "rgba(245,158,11,.08)", border: "1px solid rgba(245,158,11,.2)", borderRadius: 12, padding: "8px 12px" }}>
+                        <div style={{ color: "#f59e0b", fontSize: 22, fontWeight: 800, lineHeight: 1 }}>🔥 {streak}</div>
+                        <div style={{ color: "#64748b", fontSize: 9, marginTop: 2 }}>day streak</div>
                       </div>
                     )}
                   </div>
                   {streak > 0 && (
                     <div style={{ marginBottom: 14 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
                         <span style={{ color: "#64748b", fontSize: 10 }}>Progress to {nextMilestone} days</span>
-                        <span style={{ color: "#64748b", fontSize: 10 }}>{streak}/{nextMilestone}</span>
+                        <span style={{ color: ap.color, fontSize: 10, fontWeight: 600 }}>{streak}/{nextMilestone}</span>
                       </div>
-                      <div style={{ background: "rgba(255,255,255,0.08)", borderRadius: 100, height: 4 }}>
-                        <div style={{ height: 4, borderRadius: 100, width: `${Math.min((streak/nextMilestone)*100, 100)}%`, background: `linear-gradient(90deg,${ap.color}88,${ap.color})`, transition: "width .8s ease" }} />
+                      <div style={{ background: "rgba(255,255,255,0.08)", borderRadius: 100, height: 5 }}>
+                        <div style={{ height: 5, borderRadius: 100, width: `${Math.min((streak/nextMilestone)*100, 100)}%`, background: `linear-gradient(90deg,${ap.color}88,${ap.color})`, transition: "width .8s ease", boxShadow: `0 0 8px ${ap.color}66` }} />
                       </div>
                     </div>
                   )}
                   <button className="btn"
                     onClick={() => { setPillar(ap); setScreen("chat"); }}
-                    style={{ width: "100%", padding: "12px", background: ap.color, border: "none", borderRadius: 11, color: "#fff", fontWeight: 700, fontSize: 13 }}>
+                    style={{ width: "100%", padding: "12px", background: ap.color, border: "none", borderRadius: 12, color: "#fff", fontWeight: 700, fontSize: 13, boxShadow: `0 4px 16px rgba(${ap.rgb},.3)` }}>
                     Continue My Journey →
                   </button>
                 </div>
@@ -769,9 +805,9 @@ export default function LifePathAI() {
             );
           })()}
 
-          {/* Streak milestone celebration */}
+          {/* Streak Milestone */}
           {streak > 0 && STREAK_MILESTONES.includes(streak) && (
-            <div style={{ margin: "12px 18px 0", padding: "16px", background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 16, animation: "fadeUp .5s both" }}>
+            <div style={{ margin: "12px 18px 0", padding: "16px", background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 16 }}>
               <div style={{ color: "#f59e0b", fontWeight: 800, fontSize: 16, marginBottom: 4 }}>
                 🎉 {streak} Day Milestone!
               </div>
@@ -790,14 +826,14 @@ export default function LifePathAI() {
             </div>
           )}
 
-          {/* Switch goal */}
+          {/* Switch Goal */}
           <div style={{ padding: "20px 18px 0" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 13 }}>
               <div style={{ color: "#1e293b", fontSize: 9, fontWeight: 700, letterSpacing: 3 }}>SWITCH GOAL</div>
               <button className="btn"
                 onClick={() => setShowAllPillars(v => !v)}
                 style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 100, padding: "4px 12px", color: "#475569", fontSize: 10 }}>
-                {showAllPillars ? "Hide" : "Show all 6"}
+                {showAllPillars ? "Hide" : "Show all 6 shields"}
               </button>
             </div>
             {showAllPillars && (
@@ -812,9 +848,9 @@ export default function LifePathAI() {
                     {profile.assignedPillar === p.id && (
                       <div style={{ position: "absolute", top: 8, right: 8, background: p.color, borderRadius: 100, padding: "1px 7px", fontSize: 7, color: "#fff", fontWeight: 700 }}>ACTIVE</div>
                     )}
-                    {messages[p.id]?.length > 0 && profile.assignedPillar !== p.id && (
+                    {messages[p.id]?.filter(m => m.role === "user").length > 0 && profile.assignedPillar !== p.id && (
                       <div style={{ position: "absolute", top: 8, right: 8, background: "#334155", borderRadius: 100, padding: "1px 7px", fontSize: 7, color: "#94a3b8", fontWeight: 700 }}>
-                        {Math.floor(messages[p.id].filter(m => m.role === "user").length)}
+                        {messages[p.id].filter(m => m.role === "user").length}
                       </div>
                     )}
                   </div>
@@ -865,7 +901,7 @@ export default function LifePathAI() {
       {screen === "chat" && pillar && (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", zIndex: 1 }}>
 
-          {/* Chat header */}
+          {/* Chat Header */}
           <div style={{ padding: "11px 14px", background: "rgba(6,11,20,.97)", borderBottom: "1px solid rgba(255,255,255,.05)", backdropFilter: "blur(24px)", display: "flex", alignItems: "center", gap: 10, position: "sticky", top: 0, zIndex: 10 }}>
             <button className="btn"
               onClick={() => setScreen("home")}
@@ -910,7 +946,7 @@ export default function LifePathAI() {
               );
 
               return (
-                <div key={i} style={{ marginBottom: 14, animation: "fadeUp .3s both" }}>
+                <div key={i} style={{ marginBottom: 16, animation: "fadeUp .3s both" }}>
                   {msg.structured ? (
                     <TaskCard
                       data={msg.structured}
@@ -918,7 +954,7 @@ export default function LifePathAI() {
                       onShare={() => setShareData(msg.structured?.task || "")}
                       onTaskDone={() => handleTaskDone(pillar.id)}
                     />
-                  ) : (
+                  ) : msg.content ? (
                     <div style={{ background: "rgba(255,255,255,.022)", border: "1px solid rgba(255,255,255,.065)", borderRadius: "4px 16px 16px 16px", padding: "14px", maxWidth: "98%" }}>
                       <div style={{ color: "#06b6d4", fontSize: 9, letterSpacing: 2.5, fontWeight: 700, marginBottom: 10, fontFamily: "'JetBrains Mono',monospace" }}>
                         🛡️ LIFEPATH AI
@@ -927,14 +963,14 @@ export default function LifePathAI() {
                         {msg.content}
                       </div>
                     </div>
-                  )}
+                  ) : null}
                 </div>
               );
             })}
 
             {/* Loading */}
             {loading && (
-              <div style={{ background: "rgba(255,255,255,.022)", border: "1px solid rgba(255,255,255,.065)", borderRadius: "4px 16px 16px 16px", padding: "12px 16px", display: "inline-flex", alignItems: "center", gap: 10 }}>
+              <div style={{ background: "rgba(255,255,255,.022)", border: "1px solid rgba(255,255,255,.065)", borderRadius: "4px 16px 16px 16px", padding: "12px 16px", display: "inline-flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
                 <span style={{ color: "#06b6d4", fontSize: 9, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace" }}>ANALYZING</span>
                 {[0,1,2].map(i => (
                   <div key={i} style={{ width: 5, height: 5, borderRadius: "50%", background: "#06b6d4", animation: `dot 1.3s ${i*.22}s infinite` }} />
@@ -944,7 +980,7 @@ export default function LifePathAI() {
             <div ref={bottomRef} />
           </div>
 
-          {/* Input bar */}
+          {/* Input Bar */}
           <div style={{ padding: "10px 13px 28px", background: "rgba(6,11,20,.97)", borderTop: "1px solid rgba(255,255,255,.04)", backdropFilter: "blur(24px)" }}>
             {cvFile && (
               <div style={{ marginBottom: 9, padding: "7px 13px", background: "rgba(6,182,212,.07)", border: "1px solid rgba(6,182,212,.2)", borderRadius: 10, color: "#06b6d4", fontSize: 11, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -988,4 +1024,4 @@ export default function LifePathAI() {
       )}
     </div>
   );
-        }
+}
