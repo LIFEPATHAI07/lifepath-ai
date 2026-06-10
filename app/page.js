@@ -60,29 +60,31 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone }) => {
   const renderSteps = (text) => {
     if (!text) return null;
     return text.split("\n").map(l => l.trim()).filter(l => l.length > 0).map((line, i) => {
-      const isStep = /^Step\s*\d+:/i.test(line);
-      const stepNum = isStep ? line.match(/\d+/)?.[0] : null;
-      const stepText = isStep ? line.replace(/^Step\s*\d+:\s*/i, "") : line;
-      return (
-        <div key={i} style={{ display: "flex", gap: 12, marginBottom: 12, alignItems: "flex-start" }}>
-          {isStep ? (
+      const match = line.match(/^Step\s*(\d+):\s*(.*)/i);
+      if (match) {
+        return (
+          <div key={i} style={{ display: "flex", gap: 12, marginBottom: 13, alignItems: "flex-start" }}>
             <div style={{ width: 26, height: 26, borderRadius: "50%", background: `rgba(${pillar.rgb},.15)`, border: `1px solid rgba(${pillar.rgb},.35)`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              <span style={{ color: pillar.color, fontSize: 11, fontWeight: 800 }}>{stepNum}</span>
+              <span style={{ color: pillar.color, fontSize: 11, fontWeight: 800 }}>{match[1]}</span>
             </div>
-          ) : (
-            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#334155", flexShrink: 0, marginTop: 8 }} />
-          )}
-          <span style={{ color: "#94a3b8", fontSize: 13, lineHeight: 1.7, flex: 1 }}>{stepText}</span>
+            <span style={{ color: "#94a3b8", fontSize: 13, lineHeight: 1.7, flex: 1 }}>{match[2]}</span>
+          </div>
+        );
+      }
+      return (
+        <div key={i} style={{ display: "flex", gap: 10, marginBottom: 10, alignItems: "flex-start" }}>
+          <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#334155", flexShrink: 0, marginTop: 8 }} />
+          <span style={{ color: "#94a3b8", fontSize: 13, lineHeight: 1.7 }}>{line}</span>
         </div>
       );
     });
   };
 
   return (
-    <div style={{ borderRadius: 20, overflow: "hidden", marginBottom: 4, border: `1px solid rgba(${pillar.rgb},.2)` }}>
+    <div style={{ borderRadius: 20, overflow: "hidden", marginBottom: 4, border: `1px solid rgba(${pillar.rgb},.2)`, background: "rgba(255,255,255,.018)" }}>
 
-      {/* Summary */}
-      <div style={{ background: `rgba(${pillar.rgb},.08)`, padding: "12px 16px", borderBottom: `1px solid rgba(${pillar.rgb},.1)` }}>
+      {/* Header / Summary */}
+      <div style={{ background: `rgba(${pillar.rgb},.08)`, padding: "13px 16px", borderBottom: `1px solid rgba(${pillar.rgb},.1)` }}>
         <div style={{ color: pillar.color, fontSize: 9, fontWeight: 700, letterSpacing: 2.5, marginBottom: 5 }}>
           🛡️ LIFEPATH AI · {pillar.label.toUpperCase()}
         </div>
@@ -91,7 +93,7 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone }) => {
 
       {/* Insight */}
       {data.insight && (
-        <div style={{ padding: "11px 16px", borderBottom: "1px solid rgba(255,255,255,.05)", background: "rgba(6,182,212,.03)" }}>
+        <div style={{ padding: "11px 16px", borderBottom: "1px solid rgba(255,255,255,.04)", background: "rgba(6,182,212,.025)" }}>
           <span style={{ color: "#06b6d4", fontSize: 10, fontWeight: 700 }}>💡 </span>
           <span style={{ color: "#64748b", fontSize: 12, lineHeight: 1.6 }}>{data.insight}</span>
         </div>
@@ -100,12 +102,8 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone }) => {
       {/* TASK */}
       {data.task && (
         <div style={{ padding: "18px 16px", borderBottom: "1px solid rgba(255,255,255,.05)", background: `rgba(${pillar.rgb},.05)` }}>
-          <div style={{ color: pillar.color, fontSize: 9, fontWeight: 700, letterSpacing: 2.5, marginBottom: 10 }}>
-            ⚡ YOUR TASK TODAY
-          </div>
-          <div style={{ color: "#ffffff", fontSize: 18, fontWeight: 900, lineHeight: 1.4, marginBottom: 10 }}>
-            {data.task}
-          </div>
+          <div style={{ color: pillar.color, fontSize: 9, fontWeight: 700, letterSpacing: 2.5, marginBottom: 10 }}>⚡ YOUR TASK TODAY</div>
+          <div style={{ color: "#ffffff", fontSize: 18, fontWeight: 900, lineHeight: 1.4, marginBottom: 8 }}>{data.task}</div>
           {data.why_this_task && (
             <div style={{ color: "#64748b", fontSize: 12, lineHeight: 1.6 }}>
               <span style={{ color: "#475569", fontWeight: 600 }}>Why: </span>{data.why_this_task}
@@ -117,29 +115,23 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone }) => {
       {/* HOW TO DO */}
       {data.how_to_do && (
         <div style={{ padding: "16px 16px", borderBottom: "1px solid rgba(255,255,255,.05)" }}>
-          <div style={{ color: "#475569", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 14 }}>
-            📋 HOW TO DO
-          </div>
+          <div style={{ color: "#475569", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 14 }}>📋 HOW TO DO</div>
           {renderSteps(data.how_to_do)}
         </div>
       )}
 
       {/* WHAT TO DO */}
       {data.what_to_do && (
-        <div style={{ padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,.05)", background: "rgba(255,255,255,.015)" }}>
-          <div style={{ color: "#475569", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 8 }}>
-            ✅ WHAT TO DO
-          </div>
+        <div style={{ padding: "13px 16px", borderBottom: "1px solid rgba(255,255,255,.04)", background: "rgba(255,255,255,.01)" }}>
+          <div style={{ color: "#475569", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 7 }}>✅ WHAT TO DO</div>
           <div style={{ color: "#94a3b8", fontSize: 13, lineHeight: 1.7 }}>{data.what_to_do}</div>
         </div>
       )}
 
       {/* WHERE TO DO */}
-      {data.where_to_do && (
-        <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,.05)" }}>
-          <div style={{ color: "#475569", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 8 }}>
-            📍 WHERE TO DO
-          </div>
+      {(data.where_to_do || data.task_link) && (
+        <div style={{ padding: "13px 16px", borderBottom: "1px solid rgba(255,255,255,.04)" }}>
+          <div style={{ color: "#475569", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 10 }}>📍 WHERE TO DO</div>
           {data.task_link ? (
             <a href={data.task_link} target="_blank" rel="noopener noreferrer"
               style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "10px 20px", background: `linear-gradient(135deg,${pillar.color},${pillar.color}99)`, borderRadius: 100, color: "#fff", fontSize: 13, fontWeight: 700, textDecoration: "none", boxShadow: `0 4px 14px rgba(${pillar.rgb},.3)` }}>
@@ -153,28 +145,25 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone }) => {
 
       {/* SUCCESS */}
       {data.success && (
-        <div style={{ padding: "10px 16px", borderBottom: "1px solid rgba(255,255,255,.05)", background: "rgba(16,185,129,.03)" }}>
-          <span style={{ color: "#10b981", fontSize: 11, fontWeight: 700 }}>🎯 </span>
-          <span style={{ color: "#10b981", fontSize: 12, fontWeight: 600 }}>{data.success}</span>
+        <div style={{ padding: "10px 16px", borderBottom: "1px solid rgba(255,255,255,.04)", background: "rgba(16,185,129,.03)" }}>
+          <span style={{ color: "#10b981", fontSize: 12, fontWeight: 700 }}>🎯 {data.success}</span>
         </div>
       )}
 
       {/* MOTIVATION */}
       {data.motivation && (
-        <div style={{ padding: "11px 16px", borderBottom: "1px solid rgba(255,255,255,.05)" }}>
-          <div style={{ color: "#64748b", fontSize: 13, fontStyle: "italic", lineHeight: 1.6 }}>
-            💪 {data.motivation}
-          </div>
+        <div style={{ padding: "11px 16px", borderBottom: "1px solid rgba(255,255,255,.04)" }}>
+          <div style={{ color: "#64748b", fontSize: 13, fontStyle: "italic", lineHeight: 1.6 }}>💪 {data.motivation}</div>
         </div>
       )}
 
       {/* DONE BUTTON */}
       {data.task && (
-        <div style={{ padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,.05)" }}>
+        <div style={{ padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,.04)" }}>
           {!done ? (
             <button
               onClick={() => { setDone(true); onTaskDone?.(); }}
-              style={{ width: "100%", padding: "14px", background: `rgba(${pillar.rgb},.08)`, border: `2px solid rgba(${pillar.rgb},.3)`, borderRadius: 14, color: pillar.color, fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "inherit", transition: "all .2s", letterSpacing: 0.5 }}>
+              style={{ width: "100%", padding: "14px", background: `rgba(${pillar.rgb},.08)`, border: `2px solid rgba(${pillar.rgb},.3)`, borderRadius: 14, color: pillar.color, fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "inherit", letterSpacing: 0.5 }}>
               ✓ Mark as Done
             </button>
           ) : (
@@ -183,7 +172,7 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone }) => {
                 ✅ Task Completed! Come back tomorrow 🔥
               </div>
               <div style={{ padding: "13px 14px", background: "rgba(6,182,212,.05)", border: "1px solid rgba(6,182,212,.15)", borderRadius: 12 }}>
-                <div style={{ color: "#06b6d4", fontSize: 12, fontWeight: 700, marginBottom: 4 }}>💬 Tell me how it went</div>
+                <div style={{ color: "#06b6d4", fontSize: 11, fontWeight: 700, marginBottom: 4 }}>💬 Tell me how it went</div>
                 <div style={{ color: "#64748b", fontSize: 12, lineHeight: 1.6 }}>Type below — I'll give your next task based on your experience.</div>
               </div>
             </div>
@@ -193,23 +182,32 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone }) => {
 
       {/* NEXT STEP */}
       {data.next_step && (
-        <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,.05)" }}>
-          <div style={{ color: "#334155", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 5 }}>📅 NEXT STEP</div>
+        <div style={{ padding: "11px 16px", borderBottom: "1px solid rgba(255,255,255,.04)" }}>
+          <div style={{ color: "#334155", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 4 }}>📅 NEXT STEP</div>
           <div style={{ color: "#475569", fontSize: 12, lineHeight: 1.6 }}>{data.next_step}</div>
+        </div>
+      )}
+
+      {/* HELP HINT */}
+      {data.help_hint && (
+        <div style={{ padding: "10px 16px", borderBottom: "1px solid rgba(255,255,255,.04)", background: "rgba(255,255,255,.01)" }}>
+          <div style={{ color: "#334155", fontSize: 11, lineHeight: 1.6, fontStyle: "italic" }}>
+            💬 {data.help_hint}
+          </div>
         </div>
       )}
 
       {/* FOLLOW UP QUESTION */}
       {data.needs_more_info && data.follow_up_question && (
-        <div style={{ padding: "14px 16px", background: `rgba(${pillar.rgb},.04)`, borderBottom: "1px solid rgba(255,255,255,.05)" }}>
-          <div style={{ color: pillar.color, fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 8 }}>❓ QUICK QUESTION</div>
+        <div style={{ padding: "14px 16px", background: `rgba(${pillar.rgb},.04)`, borderBottom: "1px solid rgba(255,255,255,.04)" }}>
+          <div style={{ color: pillar.color, fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 8 }}>❓ TELL ME MORE</div>
           <div style={{ color: "#e2e8f0", fontSize: 14, fontWeight: 600, lineHeight: 1.6 }}>{data.follow_up_question}</div>
         </div>
       )}
 
       {/* SHARE */}
-      <div style={{ padding: "10px 16px", display: "flex", justifyContent: "flex-end", background: "rgba(255,255,255,.01)" }}>
-        <button onClick={onShare} style={{ padding: "6px 13px", background: "transparent", border: "1px solid rgba(255,255,255,.07)", borderRadius: 100, color: "#334155", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+      <div style={{ padding: "10px 16px", display: "flex", justifyContent: "flex-end" }}>
+        <button onClick={onShare} style={{ padding: "6px 13px", background: "transparent", border: "1px solid rgba(255,255,255,.06)", borderRadius: 100, color: "#334155", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
           📤 Share this
         </button>
       </div>
@@ -286,6 +284,18 @@ export default function LifePathAI() {
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, loading]);
   useEffect(() => { if (Object.keys(messages).length > 0) S.set("lp_chat_history", messages); }, [messages]);
 
+  const getPillarFirstQuestion = (pillarId, name) => {
+    const questions = {
+      career: `Hi ${name}! Welcome to Career Guard 🛡️\n\nWhat part of your career do you want to protect or improve right now, and what is worrying you most?`,
+      jobs: `Hi ${name}! Welcome to Job Finder 🔍\n\nTell me about your background, where you want to work, and how long you've been searching for a job.`,
+      cv: `Hi ${name}! Welcome to CV Builder 📄\n\nShare your CV situation, the job you want, and what part of your CV feels weak right now.`,
+      wealth: `Hi ${name}! Welcome to Wealth Guard 💰\n\nTell me about your income, expenses, savings, and what money goal you want help with.`,
+      hustle: `Hi ${name}! Welcome to Side Hustle 💸\n\nWhat skills do you have, how much time can you give daily, and do you want fast money or long-term income?`,
+      startup: `Hi ${name}! Welcome to Startup Validator 🚀\n\nTell me your startup idea, who it helps, what problem it solves, and what stage you are at right now.`,
+    };
+    return questions[pillarId] || questions.career;
+  };
+
   const completeOnboarding = async () => {
     setAnalyzing(true);
     await new Promise(r => setTimeout(r, 2500));
@@ -303,12 +313,12 @@ export default function LifePathAI() {
     const opening = {
       role: "assistant", content: null,
       structured: {
-        summary: `Hi ${onboardData.name}! Welcome to ${ap.label} 🛡️`,
+        summary: `Hi ${onboardData.name}! I've assigned you to ${ap.label} 🛡️`,
         insight: "", task: null, how_to_do: null, what_to_do: null,
         where_to_do: null, success: null, why_this_task: null,
-        task_link: null, task_link_label: null, motivation: null, next_step: null,
-        needs_more_info: true,
-        follow_up_question: `Tell me about yourself — why did you choose ${ap.label}? What's your situation right now? The more you share, the more personal my help will be. 🙏`,
+        task_link: null, task_link_label: null, motivation: null,
+        next_step: null, help_hint: null, needs_more_info: true,
+        follow_up_question: getPillarFirstQuestion(assignedId, onboardData.name),
       }
     };
     setMessages(m => ({ ...m, [assignedId]: [opening] }));
@@ -369,7 +379,9 @@ export default function LifePathAI() {
       .filter(m => m.content || m.structured)
       .map(m => ({
         role: m.role,
-        content: m.content || (m.structured ? `[AI: summary="${m.structured.summary || ""}" task="${m.structured.task || ""}" question="${m.structured.follow_up_question || ""}"]` : ""),
+        content: m.content || (m.structured
+          ? `[AI: summary="${m.structured.summary || ""}" task="${m.structured.task || ""}" question="${m.structured.follow_up_question || ""}"]`
+          : ""),
       }))
       .filter(m => m.content);
     apiMessages.push({ role: "user", content: userMsg });
@@ -404,8 +416,8 @@ export default function LifePathAI() {
           summary: `Fresh start! Let's go. 🛡️`, insight: "", task: null,
           how_to_do: null, what_to_do: null, where_to_do: null, success: null,
           why_this_task: null, task_link: null, task_link_label: null,
-          motivation: null, next_step: null, needs_more_info: true,
-          follow_up_question: `What's your situation with ${pillar.label} right now? Tell me — the more you share, the better I can help. 🙏`,
+          motivation: null, next_step: null, help_hint: null, needs_more_info: true,
+          follow_up_question: getPillarFirstQuestion(pillar.id, profile.name || ""),
         }
       };
       setMessages(m => ({ ...m, [pillar.id]: [opening] }));
@@ -421,8 +433,8 @@ export default function LifePathAI() {
           summary: `Switched to ${p.label}! 🛡️`, insight: "", task: null,
           how_to_do: null, what_to_do: null, where_to_do: null, success: null,
           why_this_task: null, task_link: null, task_link_label: null,
-          motivation: null, next_step: null, needs_more_info: true,
-          follow_up_question: `Tell me about yourself — why ${p.label}? What's your situation right now? 🙏`,
+          motivation: null, next_step: null, help_hint: null, needs_more_info: true,
+          follow_up_question: getPillarFirstQuestion(p.id, profile.name || ""),
         }
       };
       setMessages(m => ({ ...m, [p.id]: [opening] }));
@@ -437,7 +449,7 @@ export default function LifePathAI() {
         summary: "Amazing — task completed! 🎉", insight: "", task: null,
         how_to_do: null, what_to_do: null, where_to_do: null, success: null,
         why_this_task: null, task_link: null, task_link_label: null,
-        motivation: null, next_step: null, needs_more_info: true,
+        motivation: null, next_step: null, help_hint: null, needs_more_info: true,
         follow_up_question: "Tell me how it went — what happened? Good or bad — I'll give your next task based on your experience. 💪",
       }
     };
@@ -677,7 +689,7 @@ export default function LifePathAI() {
           {streak > 0 && STREAK_MILESTONES.includes(streak) && (
             <div style={{ margin: "12px 18px 0", padding: "16px", background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 16 }}>
               <div style={{ color: "#f59e0b", fontWeight: 800, fontSize: 16, marginBottom: 4 }}>🎉 {streak} Day Milestone!</div>
-              <div style={{ color: "#94a3b8", fontSize: 12, marginBottom: 12 }}>Incredible consistency! Share your achievement!</div>
+              <div style={{ color: "#94a3b8", fontSize: 12, marginBottom: 12 }}>Incredible! Share your achievement!</div>
               <button className="btn" onClick={() => {
                 const text = `🔥 ${streak} days with LifePath AI!\n\nGrowing daily 📈\n\nTry free: lifepath-ai-ovrt.vercel.app\n\n#LifePathAI #Growth #Kerala`;
                 if (navigator.share) navigator.share({ title: "LifePath AI", text });
@@ -846,4 +858,4 @@ export default function LifePathAI() {
       )}
     </div>
   );
-              }
+        }
