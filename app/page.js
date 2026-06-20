@@ -1,5 +1,7 @@
 "use client";
 import { useState, useRef, useEffect, useCallback } from "react";
+import FeedbackPrompt from "@/components/FeedbackPrompt";
+import InterviewForm from "@/components/InterviewForm";
 
 const S = {
   get: (k, fb = null) => { try { const d = localStorage.getItem(k); return d ? JSON.parse(d) : fb; } catch { return fb; } },
@@ -12,6 +14,32 @@ const getUsage = () => {
   const u = S.get("lp_usage", { date: today, count: 0 });
   if (u.date !== today) { const f = { date: today, count: 0 }; S.set("lp_usage", f); return f; }
   return u;
+};
+
+const getMemory = () => S.get("lp_memory", {
+  name: "", goal: "", pillarId: "", education: "", location: "",
+  skills: "", experience: "", selectedGoal: "", goalStep: 1,
+  lastTask: "", lastTaskDate: "", companiesApplied: [],
+  completedTasks: [], wins: [], failures: [], streak: 0, progress: 0,
+});
+
+const updateMemory = (updates) => {
+  const current = getMemory();
+  const updated = { ...current, ...updates };
+  if (updates.companiesApplied?.length) {
+    updated.companiesApplied = [...new Set([...current.companiesApplied, ...updates.companiesApplied])];
+  }
+  if (updates.newWin) {
+    updated.wins = [...current.wins, updates.newWin];
+  }
+  if (updates.newFailure) {
+    updated.failures = [...current.failures, updates.newFailure];
+  }
+  if (updates.lastTask && !current.completedTasks.includes(updates.lastTask)) {
+    updated.completedTasks = [...current.completedTasks, updates.lastTask];
+  }
+  S.set("lp_memory", updated);
+  return updated;
 };
 
 const assignPillar = (stage, goal) => {
@@ -40,7 +68,7 @@ const PILLARS = [
   { id: "jobs", icon: "🔍", label: "Job Finder", sub: "Real Jobs · Direct Apply · Scam Check", color: "#f59e0b", rgb: "245,158,11" },
   { id: "wealth", icon: "💰", label: "Wealth Guard", sub: "Budget · Save · Invest Smart", color: "#10b981", rgb: "16,185,129" },
   { id: "hustle", icon: "💸", label: "Side Hustle", sub: "Extra Income · A to Z Guide", color: "#a855f7", rgb: "168,85,247" },
-  { id: "startup", icon: "🚀", label: "Startup Validator", sub: "Honest Score · Strengths · Red Flags", color: "#ec4899", rgb: "236,72,153" },
+  { id: "startup", icon: "🚀", label: "Startup Validator", sub: "Validate · Score · Launch", color: "#ec4899", rgb: "236,72,153" },
 ];
 
 const AFFS = [
@@ -52,30 +80,193 @@ const AFFS = [
   { icon: "⚡", title: "Meesho Reselling", desc: "Sell from home. UPI payment.", tag: "Zero Investment", url: "https://supplier.meesho.com", color: "#f59e0b" },
 ];
 
-// Pillar-specific reflection questions after task completion
 const PILLAR_REFLECTION = {
-  career: "Tell me how it went — what happened?\n\n💬 Share what you did and what you found.\n\n→ I updated my LinkedIn and profile looks much better\n→ I identified a skill gap I didn't know about\n→ I am still confused about which direction to go",
+  career: "Tell me how it went — what happened?\n\n💬 Share what you did.\n\n→ I updated my LinkedIn and it looks much better\n→ I identified a skill gap I didn't know about\n→ I am still confused about direction",
   jobs: "Tell me how it went — what happened?\n\n💬 Share anything — good or bad.\n\n→ I applied and got a callback\n→ I applied but no response yet\n→ The site had no openings for my role",
-  cv: "Tell me how it went — what happened?\n\n💬 Share what you changed or found.\n\n→ I updated my CV summary and it looks much stronger\n→ I found my CV was missing important keywords\n→ I am not sure which keywords to add for my role",
-  wealth: "Tell me how it went — what happened?\n\n💬 Share what you found or did.\n\n→ I tracked my expenses and found where money is going\n→ I opened a savings account successfully\n→ I found I am spending more than I thought on food delivery",
-  hustle: "Tell me how it went — what happened?\n\n💬 Share what you did and what you found.\n\n→ I approached a local shop and they are interested\n→ I created my profile and published my first gig\n→ I found it hard to decide what service to offer first",
-  startup: "Tell me how it went — what happened?\n\n💬 Share what you did and what you found.\n\n→ I talked to 5 people and they confirmed the problem exists\n→ I talked to people but nobody seemed very interested\n→ I did the competitor scan and found a gap I can fill",
+  cv: "Tell me how it went — what happened?\n\n💬 Share what you changed.\n\n→ I updated my CV summary — looks stronger\n→ I found my CV was missing important keywords\n→ I am not sure which keywords to add",
+  wealth: "Tell me how it went — what happened?\n\n💬 Share what you found.\n\n→ I tracked expenses and found where money goes\n→ I opened a savings account successfully\n→ I am spending more than I thought",
+  hustle: "Tell me how it went — what happened?\n\n💬 Share what you did.\n\n→ I approached a local shop and they are interested\n→ I created my profile and published my first gig\n→ I found it hard to decide what service to offer",
+  startup: "Tell me how it went — what happened?\n\n💬 Share what you found.\n\n→ I talked to 5 people — they confirmed the problem\n→ I talked to people but nobody seemed interested\n→ I found a competitor I didn't know about",
 };
 
-const getPillarFirstQuestion = (pillarId, name) => {
-  const n = name ? `Hi ${name}! ` : "Hi! ";
+const GOAL_OPTIONS = {
+  career: ["Protect job from AI automation", "Get promoted in current role", "Switch to better career field", "Identify and fill skill gaps", "Plan 5-year career path"],
+  jobs: ["Get first job within 30 days", "Get first job within 60 days", "Switch to better company", "Get Gulf job", "Get remote job"],
+  cv: ["Build first professional CV", "Improve CV to pass ATS", "Tailor CV for specific role", "Get CV score above 80%"],
+  wealth: ["Save first Rs 10,000", "Build 3-month emergency fund", "Get out of debt", "Start Rs 500 SIP investing", "Reach Rs 1 lakh savings"],
+  hustle: ["Earn first Rs 1,000", "Earn Rs 5,000/month", "Earn Rs 10,000/month", "Build Rs 20,000/month income"],
+  startup: ["Validate my startup idea", "Get first 10 customers", "Build and launch MVP", "Apply for KSUM grant", "Reach first Rs 1 lakh revenue"],
+};
+
+const getPillarFirstQuestion = (pillarId, name, memory) => {
+  const n = name || memory?.name || "";
+  const lastName = memory?.lastTask;
+  const greeting = n ? `Hi ${n}! ` : "Hi! ";
+
+  if (lastName) {
+    return `${greeting}Welcome back! 🛡️\n\nLast time you worked on: "${lastName}"\n\nHow did it go? Tell me what happened — I'll give your next step based on your result.\n\n→ It went well — I completed it\n→ I tried but faced a problem\n→ I haven't done it yet`;
+  }
+
   const q = {
-    career: `${n}Welcome to Career Guard 🛡️\n\nWhat part of your career do you want to protect or improve right now, and what is worrying you most?\n\n💬 HOW TO GET THE BEST HELP:\nTell me your field + your specific worry.\n\n→ "I am an MEP engineer worried AI will replace my job in 5 years"\n→ "I completed EEE diploma but confused whether to go Gulf or stay Kerala"\n→ "I work as site engineer 2 years but feel stuck and want to grow"`,
-    jobs: `${n}Welcome to Job Finder 🔍\n\nTell me your target role, which city you want to work in, and how long you have been searching.\n\n💬 HOW TO GET THE BEST HELP:\nTell me role + city + how long searching.\n\n→ "MEP Electrical fresher from Kochi, targeting draftsman job, searching 2 months"\n→ "AutoCAD skills, want office job in Malappuram, searching 3 months, no response"\n→ "IT fresher from Thrissur, applying software jobs 4 months, no callbacks"`,
-    cv: `${n}Welcome to CV Builder 📄\n\nTell me the job role you are targeting, whether you already have a CV, and what part feels weak or missing.\n\n💬 HOW TO GET THE BEST HELP:\nTell me target role + CV status + weak area.\n\n→ "Targeting MEP draftsman jobs, have CV but keeps getting rejected, keywords missing"\n→ "Building CV from scratch for IT fresher jobs in Kochi, no experience yet"\n→ "Have CV, targeting AutoCAD electrical roles, summary section is very weak"`,
-    wealth: `${n}Welcome to Wealth Guard 💰\n\nTell me your monthly income, your biggest money worry, and whether you have any savings right now.\n\n💬 HOW TO GET THE BEST HELP:\nTell me income + biggest worry + savings status.\n\n→ "Earn Rs 18,000/month, spend almost everything, zero savings, want to fix this"\n→ "Earn Rs 25,000, have Rs 5,000 saved, want to start investing for first time"\n→ "Have credit card debt Rs 50,000, no savings, earn Rs 20,000 — need help"`,
-    hustle: `${n}Welcome to Side Hustle 💸\n\nWhat specific skills do you have, how many hours are you free daily, and do you want fast money or long-term income?\n\n💬 HOW TO GET THE BEST HELP:\nTell me skills + free hours + income goal.\n\n→ "Know Canva and video editing, 2 free hours daily, want fast money first"\n→ "Good at writing, free 3 hours every evening, want long-term stable income"\n→ "No digital skill but have smartphone and 1 free hour — want to start something"`,
-    startup: `${n}Welcome to Startup Validator 🚀\n\nTell me your exact startup idea, who it helps, what problem it solves, and what stage you are at.\n\n💬 HOW TO GET THE BEST HELP:\nTell me exact idea + who it helps + your stage.\n\n→ "Tiffin delivery for office workers in Kochi — idea stage, no investment yet"\n→ "App to connect plumbers with customers in Kerala — no tech skills, early stage"\n→ "Want to sell handmade items online — made 5 pieces, want to validate first"`,
+    career: `${greeting}Welcome to Career Guard 🛡️\n\nWhat part of your career do you want to protect or improve right now?\n\n💬 HOW TO GET THE BEST HELP:\n→ "I am an MEP engineer worried AI will replace my job"\n→ "I completed EEE but confused whether to go Gulf or stay Kerala"\n→ "I work as site engineer 2 years but feel stuck"`,
+    jobs: `${greeting}Welcome to Job Finder 🔍\n\nTell me your target role, city, and how long you have been searching.\n\n💬 HOW TO GET THE BEST HELP:\n→ "MEP Electrical fresher from Kochi, targeting draftsman, 2 months searching"\n→ "AutoCAD skills, want office job in Malappuram, 3 months, no response"\n→ "IT fresher from Thrissur, software jobs 4 months, no callbacks"`,
+    cv: `${greeting}Welcome to CV Builder 📄\n\nTell me your target role, whether you have a CV, and what feels weak.\n\n💬 HOW TO GET THE BEST HELP:\n→ "Targeting MEP draftsman, have CV but keeps getting rejected, keywords missing"\n→ "Building CV from scratch for IT fresher jobs in Kochi"\n→ "Have CV, targeting AutoCAD roles, summary section very weak"`,
+    wealth: `${greeting}Welcome to Wealth Guard 💰\n\nTell me your monthly income, biggest money worry, and savings status.\n\n💬 HOW TO GET THE BEST HELP:\n→ "Earn Rs 18,000/month, spend almost everything, zero savings"\n→ "Earn Rs 25,000, have Rs 5,000 saved, want to start investing"\n→ "Credit card debt Rs 50,000, no savings, earn Rs 20,000"`,
+    hustle: `${greeting}Welcome to Side Hustle 💸\n\nWhat skills do you have, how many hours free daily, and fast or long-term income?\n\n💬 HOW TO GET THE BEST HELP:\n→ "Know Canva and video editing, 2 free hours, want fast money"\n→ "Good at writing, free 3 hours evening, want long-term income"\n→ "No digital skill but have smartphone and 1 free hour"`,
+    startup: `${greeting}Welcome to Startup Validator 🚀\n\nTell me your exact idea, who it helps, what problem it solves, and your current stage.\n\n💬 HOW TO GET THE BEST HELP:\n→ "Tiffin delivery for office workers in Kochi — idea stage"\n→ "App to connect plumbers with customers in Kerala — early stage"\n→ "Want to sell handmade items online — made 5 pieces, want to validate"`,
   };
   return q[pillarId] || q.career;
 };
 
-// ── TASK CARD ──────────────────────────────────────────────────
+const ValidationScore = ({ score, pillarColor, pillarRgb }) => {
+  if (!score) return null;
+  const getColor = (val, max) => {
+    const pct = val / max;
+    if (pct >= 0.7) return "#10b981";
+    if (pct >= 0.4) return "#f59e0b";
+    return "#ef4444";
+  };
+  return (
+    <div style={{ padding: "16px", background: "rgba(255,255,255,.02)", borderRadius: 16, border: `1px solid rgba(${pillarRgb},.2)`, marginTop: 12 }}>
+      <div style={{ color: pillarColor, fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 12 }}>📊 STARTUP VALIDATION SCORE</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+        <div style={{ width: 64, height: 64, borderRadius: "50%", background: `rgba(${pillarRgb},.1)`, border: `3px solid ${getColor(score.overall, 100)}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <span style={{ color: getColor(score.overall, 100), fontSize: 20, fontWeight: 900 }}>{score.overall}</span>
+        </div>
+        <div>
+          <div style={{ color: "#e2e8f0", fontWeight: 700, fontSize: 14 }}>Overall Score</div>
+          <div style={{ color: "#64748b", fontSize: 11 }}>out of 100</div>
+        </div>
+      </div>
+      {[
+        { label: "Market", val: score.market },
+        { label: "Problem", val: score.problem },
+        { label: "Competition", val: score.competition },
+        { label: "Execution", val: score.execution },
+      ].map((s, i) => (
+        <div key={i} style={{ marginBottom: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+            <span style={{ color: "#94a3b8", fontSize: 11 }}>{s.label}</span>
+            <span style={{ color: getColor(s.val, 10), fontSize: 11, fontWeight: 700 }}>{s.val}/10</span>
+          </div>
+          <div style={{ background: "rgba(255,255,255,.08)", borderRadius: 100, height: 4 }}>
+            <div style={{ height: 4, borderRadius: 100, width: `${(s.val / 10) * 100}%`, background: getColor(s.val, 10) }} />
+          </div>
+        </div>
+      ))}
+      {score.strengths?.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ color: "#10b981", fontSize: 10, fontWeight: 700, marginBottom: 6 }}>✅ STRENGTHS</div>
+          {score.strengths.map((s, i) => <div key={i} style={{ color: "#94a3b8", fontSize: 12, marginBottom: 3 }}>• {s}</div>)}
+        </div>
+      )}
+      {score.weaknesses?.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ color: "#ef4444", fontSize: 10, fontWeight: 700, marginBottom: 6 }}>⚠️ WEAKNESSES</div>
+          {score.weaknesses.map((w, i) => <div key={i} style={{ color: "#94a3b8", fontSize: 12, marginBottom: 3 }}>• {w}</div>)}
+        </div>
+      )}
+      {score.risk && (
+        <div style={{ marginTop: 10, padding: "10px", background: "rgba(239,68,68,.06)", borderRadius: 10, border: "1px solid rgba(239,68,68,.15)" }}>
+          <div style={{ color: "#ef4444", fontSize: 10, fontWeight: 700, marginBottom: 4 }}>🔴 RISK</div>
+          <div style={{ color: "#94a3b8", fontSize: 12 }}>{score.risk}</div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const ProgressDashboard = ({ memory, pillar, onClose }) => {
+  const wins = memory.wins || [];
+  const completed = memory.completedTasks || [];
+  const progress = memory.progress || 0;
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 300, display: "flex", alignItems: "flex-end" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, margin: "0 auto", background: "#0a1020", borderRadius: "22px 22px 0 0", padding: "24px 20px 48px", border: "1px solid rgba(255,255,255,0.07)", maxHeight: "85vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <div>
+            <div style={{ color: "#fff", fontWeight: 800, fontSize: 18 }}>📊 Your Progress</div>
+            <div style={{ color: "#64748b", fontSize: 12, marginTop: 2 }}>{memory.selectedGoal || "No goal set yet"}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.1)", borderRadius: 100, padding: "6px 14px", color: "#64748b", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Close</button>
+        </div>
+
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+            <span style={{ color: "#94a3b8", fontSize: 12 }}>Overall Progress</span>
+            <span style={{ color: pillar.color, fontSize: 12, fontWeight: 700 }}>{progress}%</span>
+          </div>
+          <div style={{ background: "rgba(255,255,255,.08)", borderRadius: 100, height: 8 }}>
+            <div style={{ height: 8, borderRadius: 100, width: `${progress}%`, background: `linear-gradient(90deg,${pillar.color}88,${pillar.color})`, transition: "width 1s ease", boxShadow: `0 0 10px ${pillar.color}66` }} />
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 20 }}>
+          {[
+            { label: "Tasks Done", value: completed.length, icon: "✅" },
+            { label: "Wins", value: wins.length, icon: "🏆" },
+            { label: "Day Streak", value: memory.streak || 0, icon: "🔥" },
+          ].map((stat, i) => (
+            <div key={i} style={{ background: "rgba(255,255,255,.04)", borderRadius: 14, padding: "14px 10px", textAlign: "center", border: "1px solid rgba(255,255,255,.07)" }}>
+              <div style={{ fontSize: 20, marginBottom: 4 }}>{stat.icon}</div>
+              <div style={{ color: "#fff", fontWeight: 800, fontSize: 20 }}>{stat.value}</div>
+              <div style={{ color: "#64748b", fontSize: 10, marginTop: 2 }}>{stat.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {wins.length > 0 && (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ color: "#f59e0b", fontSize: 11, fontWeight: 700, letterSpacing: 2, marginBottom: 10 }}>🏆 YOUR WINS</div>
+            {wins.map((w, i) => (
+              <div key={i} style={{ padding: "10px 14px", background: "rgba(245,158,11,.06)", border: "1px solid rgba(245,158,11,.2)", borderRadius: 12, marginBottom: 8 }}>
+                <span style={{ color: "#f59e0b", fontSize: 13 }}>🎉 {w}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {completed.length > 0 && (
+          <div>
+            <div style={{ color: "#10b981", fontSize: 11, fontWeight: 700, letterSpacing: 2, marginBottom: 10 }}>✅ COMPLETED TASKS</div>
+            {completed.slice(-5).map((t, i) => (
+              <div key={i} style={{ padding: "9px 14px", background: "rgba(16,185,129,.04)", border: "1px solid rgba(16,185,129,.1)", borderRadius: 10, marginBottom: 6 }}>
+                <span style={{ color: "#64748b", fontSize: 12 }}>• {t}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {completed.length === 0 && wins.length === 0 && (
+          <div style={{ textAlign: "center", padding: "30px 0" }}>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>🚀</div>
+            <div style={{ color: "#64748b", fontSize: 14 }}>Complete your first task to start tracking progress!</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const GoalSelector = ({ pillarId, pillarColor, pillarRgb, onSelect, onClose }) => {
+  const goals = GOAL_OPTIONS[pillarId] || [];
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 300, display: "flex", alignItems: "flex-end" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, margin: "0 auto", background: "#0a1020", borderRadius: "22px 22px 0 0", padding: "24px 20px 44px", border: "1px solid rgba(255,255,255,0.07)" }}>
+        <div style={{ color: "#fff", fontWeight: 800, fontSize: 18, marginBottom: 6 }}>🎯 Set Your Goal</div>
+        <div style={{ color: "#64748b", fontSize: 12, marginBottom: 20 }}>Choose your goal — AI will create a roadmap for you</div>
+        {goals.map((g, i) => (
+          <button key={i} onClick={() => onSelect(g)}
+            style={{ width: "100%", padding: "14px 16px", background: "rgba(255,255,255,.04)", border: `1px solid rgba(${pillarRgb},.2)`, borderRadius: 14, color: "#e2e8f0", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", marginBottom: 10, textAlign: "left" }}>
+            🎯 {g}
+          </button>
+        ))}
+        <button onClick={onClose} style={{ width: "100%", padding: 12, background: "transparent", border: "1px solid rgba(255,255,255,.08)", borderRadius: 12, color: "#64748b", fontSize: 13, cursor: "pointer", fontFamily: "inherit", marginTop: 4 }}>Cancel</button>
+      </div>
+    </div>
+  );
+};
+
 const TaskCard = ({ data, pillar, onShare, onTaskDone, onFillInput }) => {
   const [done, setDone] = useState(false);
   if (!data) return null;
@@ -119,7 +310,7 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone, onFillInput }) => {
           </div>
         );
       }
-      if (t.startsWith("💬") || t.toLowerCase().startsWith("how to") || t.toLowerCase().startsWith("example")) {
+      if (t.startsWith("💬") || t.toLowerCase().startsWith("how to")) {
         return <div key={i} style={{ color: "#475569", fontSize: 10, fontWeight: 700, letterSpacing: 1, marginTop: 12, marginBottom: 2 }}>{t}</div>;
       }
       return <div key={i} style={{ color: isHint ? "#334155" : "#e2e8f0", fontSize: isHint ? 11 : 14, fontWeight: isHint ? 400 : 600, lineHeight: 1.6, marginBottom: 2 }}>{t}</div>;
@@ -129,7 +320,6 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone, onFillInput }) => {
   return (
     <div style={{ borderRadius: 20, overflow: "hidden", marginBottom: 4, border: `1px solid rgba(${pillar.rgb},.2)`, background: "rgba(255,255,255,.018)" }}>
 
-      {/* Header */}
       <div style={{ background: `rgba(${pillar.rgb},.08)`, padding: "13px 16px", borderBottom: `1px solid rgba(${pillar.rgb},.1)` }}>
         <div style={{ color: pillar.color, fontSize: 9, fontWeight: 700, letterSpacing: 2.5, marginBottom: 5 }}>
           🛡️ LIFEPATH AI · {pillar.label.toUpperCase()}
@@ -137,7 +327,13 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone, onFillInput }) => {
         <div style={{ color: "#e2e8f0", fontSize: 13, fontWeight: 600, lineHeight: 1.5 }}>{data.summary}</div>
       </div>
 
-      {/* Insight */}
+      {data.coach_note && (
+        <div style={{ padding: "11px 16px", borderBottom: "1px solid rgba(255,255,255,.04)", background: "rgba(99,102,241,.03)" }}>
+          <span style={{ color: "#6366f1", fontSize: 10, fontWeight: 700 }}>🎯 COACH: </span>
+          <span style={{ color: "#94a3b8", fontSize: 12, lineHeight: 1.6 }}>{data.coach_note}</span>
+        </div>
+      )}
+
       {data.insight && (
         <div style={{ padding: "11px 16px", borderBottom: "1px solid rgba(255,255,255,.04)", background: "rgba(6,182,212,.025)" }}>
           <span style={{ color: "#06b6d4", fontSize: 10, fontWeight: 700 }}>💡 </span>
@@ -145,7 +341,19 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone, onFillInput }) => {
         </div>
       )}
 
-      {/* Task */}
+      {data.roadmap_step && (
+        <div style={{ padding: "8px 16px", borderBottom: "1px solid rgba(255,255,255,.04)", background: `rgba(${pillar.rgb},.03)` }}>
+          <span style={{ color: pillar.color, fontSize: 10, fontWeight: 700 }}>🗺️ {data.roadmap_step}</span>
+        </div>
+      )}
+
+      {data.win_detected && (
+        <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,.04)", background: "rgba(245,158,11,.06)", border: "1px solid rgba(245,158,11,.2)" }}>
+          <div style={{ color: "#f59e0b", fontSize: 12, fontWeight: 700, marginBottom: 2 }}>🏆 WIN RECORDED!</div>
+          <div style={{ color: "#94a3b8", fontSize: 12 }}>{data.win_detected}</div>
+        </div>
+      )}
+
       {data.task && (
         <div style={{ padding: "18px 16px", borderBottom: "1px solid rgba(255,255,255,.05)", background: `rgba(${pillar.rgb},.05)` }}>
           <div style={{ color: pillar.color, fontSize: 9, fontWeight: 700, letterSpacing: 2.5, marginBottom: 10 }}>⚡ YOUR TASK TODAY</div>
@@ -158,7 +366,6 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone, onFillInput }) => {
         </div>
       )}
 
-      {/* How to do */}
       {data.how_to_do && (
         <div style={{ padding: "16px 16px", borderBottom: "1px solid rgba(255,255,255,.05)" }}>
           <div style={{ color: "#475569", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 14 }}>📋 HOW TO DO</div>
@@ -166,7 +373,6 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone, onFillInput }) => {
         </div>
       )}
 
-      {/* What to do */}
       {data.what_to_do && (
         <div style={{ padding: "13px 16px", borderBottom: "1px solid rgba(255,255,255,.04)", background: "rgba(255,255,255,.01)" }}>
           <div style={{ color: "#475569", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 7 }}>✅ WHAT TO DO</div>
@@ -174,7 +380,6 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone, onFillInput }) => {
         </div>
       )}
 
-      {/* Where to do */}
       {(data.where_to_do || data.task_link) && (
         <div style={{ padding: "13px 16px", borderBottom: "1px solid rgba(255,255,255,.04)" }}>
           <div style={{ color: "#475569", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 10 }}>📍 WHERE TO DO</div>
@@ -189,21 +394,24 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone, onFillInput }) => {
         </div>
       )}
 
-      {/* Success */}
+      {data.validation_score && (
+        <div style={{ padding: "0 16px 16px" }}>
+          <ValidationScore score={data.validation_score} pillarColor={pillar.color} pillarRgb={pillar.rgb} />
+        </div>
+      )}
+
       {data.success && (
         <div style={{ padding: "10px 16px", borderBottom: "1px solid rgba(255,255,255,.04)", background: "rgba(16,185,129,.03)" }}>
           <span style={{ color: "#10b981", fontSize: 12, fontWeight: 700 }}>🎯 {data.success}</span>
         </div>
       )}
 
-      {/* Motivation */}
       {data.motivation && (
         <div style={{ padding: "11px 16px", borderBottom: "1px solid rgba(255,255,255,.04)" }}>
           <div style={{ color: "#64748b", fontSize: 13, fontStyle: "italic", lineHeight: 1.6 }}>💪 {data.motivation}</div>
         </div>
       )}
 
-      {/* Done button */}
       {data.task && (
         <div style={{ padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,.04)" }}>
           {!done ? (
@@ -218,22 +426,20 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone, onFillInput }) => {
               </div>
               <div style={{ padding: "13px 14px", background: "rgba(6,182,212,.05)", border: "1px solid rgba(6,182,212,.15)", borderRadius: 12 }}>
                 <div style={{ color: "#06b6d4", fontSize: 11, fontWeight: 700, marginBottom: 4 }}>💬 Tell me how it went</div>
-                <div style={{ color: "#64748b", fontSize: 12, lineHeight: 1.6 }}>Type below — I'll give your next task based on your experience.</div>
+                <div style={{ color: "#64748b", fontSize: 12, lineHeight: 1.6 }}>Type below — I'll give your next step based on your result.</div>
               </div>
             </div>
           )}
         </div>
       )}
 
-      {/* Next step */}
       {data.next_step && (
-        <div style={{ padding: "11px 16px", borderBottom: "1px solid rgba(255,255,255,.04)" }}>
-          <div style={{ color: "#334155", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 4 }}>📅 NEXT STEP</div>
+        <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,.04)", background: "rgba(99,102,241,.03)" }}>
+          <div style={{ color: "#6366f1", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 4 }}>🔒 NEXT LOCKED STEP</div>
           <div style={{ color: "#475569", fontSize: 12, lineHeight: 1.6 }}>{data.next_step}</div>
         </div>
       )}
 
-      {/* Follow up with tappable examples */}
       {data.needs_more_info && data.follow_up_question && (
         <div style={{ padding: "14px 16px", background: `rgba(${pillar.rgb},.04)`, borderBottom: "1px solid rgba(255,255,255,.04)" }}>
           <div style={{ color: pillar.color, fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 10 }}>❓ TELL ME MORE</div>
@@ -241,7 +447,6 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone, onFillInput }) => {
         </div>
       )}
 
-      {/* Help hint */}
       {data.help_hint && (
         <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,.04)", background: "rgba(255,255,255,.008)" }}>
           <div style={{ color: "#334155", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 6 }}>💡 TIP</div>
@@ -249,7 +454,6 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone, onFillInput }) => {
         </div>
       )}
 
-      {/* Share */}
       <div style={{ padding: "10px 16px", display: "flex", justifyContent: "flex-end" }}>
         <button onClick={onShare}
           style={{ padding: "6px 13px", background: "transparent", border: "1px solid rgba(255,255,255,.06)", borderRadius: 100, color: "#334155", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
@@ -260,7 +464,6 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone, onFillInput }) => {
   );
 };
 
-// ── SHARE CARD ─────────────────────────────────────────────────
 const ShareCard = ({ pillar, task, streak, onClose }) => {
   const streakText = streak > 0 ? `🔥 ${streak} day streak!\n` : "";
   const shareText = `🛡️ LifePath AI gave me my task for today!\n\n⚡ "${task || "Growth task"}"\n\n${streakText}\nIndia's first AI Growth Companion — FREE!\nMalayalam + English 🇮🇳\n\nTry: lifepath-ai-ovrt.vercel.app\n\n#LifePathAI #Growth #Kerala`;
@@ -287,7 +490,6 @@ const ShareCard = ({ pillar, task, streak, onClose }) => {
   );
 };
 
-// ── MAIN APP ───────────────────────────────────────────────────
 export default function LifePathAI() {
   const [screen, setScreen] = useState("splash");
   const [pillar, setPillar] = useState(null);
@@ -296,6 +498,7 @@ export default function LifePathAI() {
   const [loading, setLoading] = useState(false);
   const [phase, setPhase] = useState(0);
   const [profile, setProfile] = useState(() => S.get("lp_profile", {}));
+  const [memory, setMemory] = useState(() => getMemory());
   const [accepted, setAccepted] = useState(() => S.get("lp_accepted", false));
   const [onboarded, setOnboarded] = useState(() => S.get("lp_onboarded", false));
   const [onboardStep, setOnboardStep] = useState(0);
@@ -306,6 +509,15 @@ export default function LifePathAI() {
   const [toast, setToast] = useState("");
   const [cvFile, setCvFile] = useState(null);
   const [showAllPillars, setShowAllPillars] = useState(false);
+  const [showDashboard, setShowDashboard] = useState(false);
+  const [showGoalSelector, setShowGoalSelector] = useState(false);
+
+  // ── FEEDBACK SYSTEM STATE ──
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [showInterview, setShowInterview] = useState(false);
+  const [feedbackShown, setFeedbackShown] = useState(() => S.get("lp_feedback_shown", false));
+  const [msgCount, setMsgCount] = useState(() => S.get("lp_msg_count", 0));
+
   const bottomRef = useRef(null);
   const fileRef = useRef(null);
   const textareaRef = useRef(null);
@@ -331,15 +543,16 @@ export default function LifePathAI() {
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, loading]);
   useEffect(() => { if (Object.keys(messages).length > 0) S.set("lp_chat_history", messages); }, [messages]);
 
-  const makeOpeningMsg = (pillarId, name) => ({
+  const makeOpeningMsg = (pillarId, name, mem) => ({
     role: "assistant", content: null,
     structured: {
-      summary: `Hi ${name || ""}! I've assigned you to ${PILLARS.find(p => p.id === pillarId)?.label} 🛡️`,
-      insight: "", task: null, how_to_do: null, what_to_do: null,
-      where_to_do: null, success: null, why_this_task: null,
-      task_link: null, task_link_label: null, motivation: null,
-      next_step: null, help_hint: null, needs_more_info: true,
-      follow_up_question: getPillarFirstQuestion(pillarId, name || ""),
+      summary: `Hi ${name || ""}! Welcome to ${PILLARS.find(p => p.id === pillarId)?.label} 🛡️`,
+      coach_note: "", insight: "", task: null, how_to_do: null, what_to_do: null,
+      where_to_do: null, success: null, why_this_task: null, task_link: null,
+      task_link_label: null, motivation: null, next_step: null,
+      roadmap_step: "", win_detected: "", validation_score: null,
+      memory_update: null, help_hint: null, needs_more_info: true,
+      follow_up_question: getPillarFirstQuestion(pillarId, name, mem),
     }
   });
 
@@ -355,9 +568,13 @@ export default function LifePathAI() {
     setOnboarded(true);
     const ns = updateStreak();
     setStreak(ns.count);
+
+    const newMemory = updateMemory({ name: onboardData.name, pillarId: assignedId, streak: ns.count });
+    setMemory(newMemory);
+
     setAnalyzing(false);
     setPillar(ap);
-    setMessages(m => ({ ...m, [assignedId]: [makeOpeningMsg(assignedId, onboardData.name)] }));
+    setMessages(m => ({ ...m, [assignedId]: [makeOpeningMsg(assignedId, onboardData.name, newMemory)] }));
     setScreen("chat");
   };
 
@@ -411,6 +628,7 @@ export default function LifePathAI() {
     const userMsg = input.trim();
     setInput(""); setCvFile(null);
     const prev = messages[pillar.id] || [];
+    const currentMemory = getMemory();
     const apiMessages = prev
       .filter(m => m.content || m.structured)
       .map(m => ({
@@ -428,17 +646,39 @@ export default function LifePathAI() {
     const ns = updateStreak();
     setStreak(ns.count);
     try {
-      const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: apiMessages, pillarId: pillar.id, profile }) });
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: apiMessages, pillarId: pillar.id, profile: { ...profile, ...currentMemory } })
+      });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      setMessages(m => ({ ...m, [pillar.id]: [...newMsgs, { role: "assistant", content: data.reply || null, structured: data.structured || null }] }));
+
+      const aiMsg = { role: "assistant", content: data.reply || null, structured: data.structured || null };
+
+      if (data.structured?.memory_update) {
+        const mu = data.structured.memory_update;
+        const updatedMem = updateMemory({ ...mu, streak: ns.count });
+        setMemory(updatedMem);
+      }
+
+      setMessages(m => ({ ...m, [pillar.id]: [...newMsgs, aiMsg] }));
     } catch (err) {
       setMessages(m => ({ ...m, [pillar.id]: [...newMsgs, { role: "assistant", content: `⚠️ ${err.message || "Connection error. Please retry."}`, structured: null }] }));
     }
     setLoading(false);
+
+    // ── FEEDBACK TRIGGER: Track message count and show feedback after 5 messages ──
+    const newCount = msgCount + 1;
+    setMsgCount(newCount);
+    S.set("lp_msg_count", newCount);
+    if (newCount >= 5 && !feedbackShown) {
+      setTimeout(() => setShowFeedback(true), 1500);
+      setFeedbackShown(true);
+      S.set("lp_feedback_shown", true);
+    }
   };
 
-  // Enter = new line, Shift+Enter = send
   const handleKey = (e) => {
     if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); sendMessage(); }
   };
@@ -447,13 +687,13 @@ export default function LifePathAI() {
     if (!pillar) return;
     setMessages(m => { const u = { ...m }; delete u[pillar.id]; S.set("lp_chat_history", u); return u; });
     fireToast("💬 Chat cleared");
-    setTimeout(() => { setMessages(m => ({ ...m, [pillar.id]: [makeOpeningMsg(pillar.id, profile.name || "")] })); }, 100);
+    setTimeout(() => { setMessages(m => ({ ...m, [pillar.id]: [makeOpeningMsg(pillar.id, profile.name || "", memory)] })); }, 100);
   };
 
   const switchPillar = (p) => {
     setPillar(p); setShowAllPillars(false);
     if (!messages[p.id] || messages[p.id].length === 0) {
-      setMessages(m => ({ ...m, [p.id]: [makeOpeningMsg(p.id, profile.name || "")] }));
+      setMessages(m => ({ ...m, [p.id]: [makeOpeningMsg(p.id, profile.name || "", memory)] }));
     }
     setScreen("chat");
   };
@@ -465,14 +705,26 @@ export default function LifePathAI() {
       [pillarId]: [...(m[pillarId] || []), {
         role: "assistant", content: null,
         structured: {
-          summary: "Amazing — task completed! 🎉", insight: "", task: null,
+          summary: "Amazing — task completed! 🎉", coach_note: "", insight: "", task: null,
           how_to_do: null, what_to_do: null, where_to_do: null, success: null,
           why_this_task: null, task_link: null, task_link_label: null,
-          motivation: null, next_step: null, help_hint: null, needs_more_info: true,
+          motivation: null, next_step: null, roadmap_step: "", win_detected: "",
+          validation_score: null, memory_update: null, help_hint: null, needs_more_info: true,
           follow_up_question: reflection,
         }
       }]
     }));
+  };
+
+  const handleGoalSelect = (goal) => {
+    const updatedMem = updateMemory({ selectedGoal: goal, goalStep: 1, progress: 5 });
+    setMemory(updatedMem);
+    setShowGoalSelector(false);
+    fireToast(`🎯 Goal set: ${goal}`);
+    if (pillar) {
+      setInput(`My goal is: ${goal}. Please create my roadmap and give me my first task.`);
+      setTimeout(() => textareaRef.current?.focus(), 100);
+    }
   };
 
   const curMsgs = pillar ? (messages[pillar.id] || []) : [];
@@ -514,6 +766,16 @@ export default function LifePathAI() {
       )}
 
       {shareData && pillar && <ShareCard pillar={pillar} task={shareData} streak={streak} onClose={() => setShareData(null)} />}
+      {showDashboard && pillar && <ProgressDashboard memory={memory} pillar={pillar} onClose={() => setShowDashboard(false)} />}
+      {showGoalSelector && pillar && <GoalSelector pillarId={pillar.id} pillarColor={pillar.color} pillarRgb={pillar.rgb} onSelect={handleGoalSelect} onClose={() => setShowGoalSelector(false)} />}
+
+      {/* ── FEEDBACK SYSTEM RENDER ── */}
+      {showFeedback && pillar && (
+        <FeedbackPrompt pillar={pillar} onClose={() => setShowFeedback(false)} onDone={() => setShowFeedback(false)} />
+      )}
+      {showInterview && pillar && (
+        <InterviewForm pillar={pillar} onClose={() => setShowInterview(false)} />
+      )}
 
       {/* SPLASH */}
       {screen === "splash" && (
@@ -526,7 +788,7 @@ export default function LifePathAI() {
             <div style={{ fontSize: 52, fontWeight: 900, color: "#fff", letterSpacing: "-2px" }}>LifePath <span style={{ color: "#06b6d4" }}>AI</span></div>
           </div>
           <div style={{ animation: phase >= 2 ? "fadeUp .6s both" : "none", opacity: phase >= 2 ? 1 : 0, zIndex: 1 }}>
-            <div style={{ color: "#0d2535", fontSize: 11, letterSpacing: "0.2em", fontFamily: "'JetBrains Mono',monospace" }}>YOUR GROWTH COMPANION · ALWAYS WITH YOU</div>
+            <div style={{ color: "#0d2535", fontSize: 11, letterSpacing: "0.2em", fontFamily: "'JetBrains Mono',monospace" }}>YOUR PERSONAL GROWTH COACH · ALWAYS WITH YOU</div>
           </div>
           <div style={{ marginTop: 70, display: "flex", gap: 9, animation: phase >= 1 ? "fadeIn .5s 1s both" : "none" }}>
             {[0,1,2].map(i => <div key={i} style={{ width: 5, height: 5, borderRadius: "50%", background: "#06b6d4", animation: `dot 1.5s ${i*.25}s infinite` }} />)}
@@ -540,7 +802,7 @@ export default function LifePathAI() {
           <div style={{ width: "100%", background: "#0a1020", borderRadius: "24px 24px 0 0", padding: "32px 22px 48px", border: "1px solid rgba(255,255,255,0.07)" }}>
             <div style={{ fontSize: 38, marginBottom: 14, textAlign: "center" }}>🛡️</div>
             <div style={{ color: "#fff", fontWeight: 900, fontSize: 22, marginBottom: 8, textAlign: "center" }}>Welcome to LifePath AI</div>
-            <div style={{ color: "#64748b", fontSize: 13, lineHeight: 1.7, marginBottom: 22, textAlign: "center" }}>Your daily AI growth companion 🇮🇳<br />Free forever · Malayalam + English</div>
+            <div style={{ color: "#64748b", fontSize: 13, lineHeight: 1.7, marginBottom: 22, textAlign: "center" }}>Your personal AI growth coach 🇮🇳<br />Remembers you · Tracks progress · Free forever</div>
             <div style={{ background: "rgba(245,158,11,0.07)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: 14, padding: "14px 16px", marginBottom: 22 }}>
               <div style={{ color: "#f59e0b", fontSize: 11, fontWeight: 700, marginBottom: 7 }}>⚠️ DISCLAIMER</div>
               <div style={{ color: "#94a3b8", fontSize: 12, lineHeight: 1.7 }}>General guidance only — not professional financial, legal, or career advice.</div>
@@ -628,9 +890,9 @@ export default function LifePathAI() {
       {analyzing && (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 1, padding: 40 }}>
           <div style={{ fontSize: 48, marginBottom: 20 }}>🛡️</div>
-          <div style={{ color: "#fff", fontWeight: 800, fontSize: 20, marginBottom: 8, textAlign: "center" }}>Analyzing your profile...</div>
-          <div style={{ color: "#475569", fontSize: 13, marginBottom: 30, textAlign: "center" }}>Finding your perfect growth path</div>
-          {["Reading your goals...", "Finding your best pillar...", "Preparing your experience..."].map((txt, i) => (
+          <div style={{ color: "#fff", fontWeight: 800, fontSize: 20, marginBottom: 8, textAlign: "center" }}>Setting up your coach...</div>
+          <div style={{ color: "#475569", fontSize: 13, marginBottom: 30, textAlign: "center" }}>Building your personal growth system</div>
+          {["Reading your goals...", "Finding your best pillar...", "Setting up memory..."].map((txt, i) => (
             <div key={i} style={{ color: "#06b6d4", fontSize: 12, marginBottom: 8, animation: `fadeIn .5s ${i*.6}s both`, opacity: 0 }}>✓ {txt}</div>
           ))}
           <div style={{ width: "100%", maxWidth: 280, background: "rgba(255,255,255,0.05)", borderRadius: 100, height: 4, overflow: "hidden", marginTop: 20 }}>
@@ -648,7 +910,7 @@ export default function LifePathAI() {
             <div>
               <span style={{ fontSize: 22, fontWeight: 900, color: "#fff", letterSpacing: "-0.8px" }}>LifePath </span>
               <span style={{ fontSize: 22, fontWeight: 900, color: "#06b6d4", letterSpacing: "-0.8px" }}>AI</span>
-              <div style={{ color: "#1e3a4a", fontSize: 8, letterSpacing: 2.5, fontFamily: "'JetBrains Mono',monospace", marginTop: 1 }}>GROWTH COMPANION 🛡️</div>
+              <div style={{ color: "#1e3a4a", fontSize: 8, letterSpacing: 2.5, fontFamily: "'JetBrains Mono',monospace", marginTop: 1 }}>YOUR GROWTH COACH 🛡️</div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               {streak > 0 && (
@@ -670,13 +932,14 @@ export default function LifePathAI() {
               <div style={{ margin: "16px 18px 0", animation: "fadeUp .5s .1s both" }}>
                 <div style={{ color: "#64748b", fontSize: 13, marginBottom: 12 }}>
                   Welcome back, <strong style={{ color: "#e2e8f0" }}>{profile.name?.split(" ")[0]}</strong>! 👋
+                  {memory.lastTask && <span style={{ color: "#334155", fontSize: 11, display: "block", marginTop: 2 }}>Last: {memory.lastTask}</span>}
                 </div>
                 <div style={{ padding: "18px 16px", background: `linear-gradient(135deg,rgba(${ap.rgb},.1),rgba(${ap.rgb},.05))`, border: `1px solid rgba(${ap.rgb},.25)`, borderRadius: 18 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                     <div>
                       <div style={{ color: ap.color, fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 4 }}>YOUR ACTIVE SHIELD</div>
                       <div style={{ color: "#fff", fontWeight: 800, fontSize: 16 }}>{ap.icon} {ap.label}</div>
-                      <div style={{ color: "#475569", fontSize: 11, marginTop: 3 }}>{ap.sub}</div>
+                      {memory.selectedGoal && <div style={{ color: "#64748b", fontSize: 11, marginTop: 3 }}>🎯 {memory.selectedGoal}</div>}
                     </div>
                     {streak > 0 && (
                       <div style={{ textAlign: "right", background: "rgba(245,158,11,.08)", border: "1px solid rgba(245,158,11,.2)", borderRadius: 12, padding: "8px 12px" }}>
@@ -685,25 +948,40 @@ export default function LifePathAI() {
                       </div>
                     )}
                   </div>
-                  {streak > 0 && (
+
+                  {memory.progress > 0 && (
                     <div style={{ marginBottom: 14 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-                        <span style={{ color: "#64748b", fontSize: 10 }}>Progress to {nextMilestone} days</span>
-                        <span style={{ color: ap.color, fontSize: 10, fontWeight: 600 }}>{streak}/{nextMilestone}</span>
+                        <span style={{ color: "#64748b", fontSize: 10 }}>Goal Progress</span>
+                        <span style={{ color: ap.color, fontSize: 10, fontWeight: 600 }}>{memory.progress}%</span>
                       </div>
                       <div style={{ background: "rgba(255,255,255,0.08)", borderRadius: 100, height: 5 }}>
-                        <div style={{ height: 5, borderRadius: 100, width: `${Math.min((streak/nextMilestone)*100,100)}%`, background: `linear-gradient(90deg,${ap.color}88,${ap.color})`, transition: "width .8s ease", boxShadow: `0 0 8px ${ap.color}66` }} />
+                        <div style={{ height: 5, borderRadius: 100, width: `${Math.min(memory.progress, 100)}%`, background: `linear-gradient(90deg,${ap.color}88,${ap.color})`, transition: "width .8s ease", boxShadow: `0 0 8px ${ap.color}66` }} />
                       </div>
                     </div>
                   )}
-                  <button className="btn" onClick={() => { setPillar(ap); setScreen("chat"); }}
-                    style={{ width: "100%", padding: "12px", background: ap.color, border: "none", borderRadius: 12, color: "#fff", fontWeight: 700, fontSize: 13, boxShadow: `0 4px 16px rgba(${ap.rgb},.3)` }}>
-                    Continue My Journey →
-                  </button>
+
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button className="btn" onClick={() => { setPillar(ap); setScreen("chat"); }}
+                      style={{ flex: 1, padding: "12px", background: ap.color, border: "none", borderRadius: 12, color: "#fff", fontWeight: 700, fontSize: 13, boxShadow: `0 4px 16px rgba(${ap.rgb},.3)` }}>
+                      Continue Journey →
+                    </button>
+                    <button className="btn" onClick={() => setShowDashboard(true)}
+                      style={{ padding: "12px 14px", background: "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.1)", borderRadius: 12, color: "#94a3b8", fontSize: 12, fontWeight: 600 }}>
+                      📊
+                    </button>
+                  </div>
                 </div>
               </div>
             );
           })()}
+
+          {memory.wins?.length > 0 && (
+            <div style={{ margin: "12px 18px 0", padding: "14px 16px", background: "rgba(245,158,11,.06)", border: "1px solid rgba(245,158,11,.2)", borderRadius: 16 }}>
+              <div style={{ color: "#f59e0b", fontWeight: 700, fontSize: 13, marginBottom: 4 }}>🏆 Latest Win!</div>
+              <div style={{ color: "#94a3b8", fontSize: 12 }}>{memory.wins[memory.wins.length - 1]}</div>
+            </div>
+          )}
 
           {streak > 0 && STREAK_MILESTONES.includes(streak) && (
             <div style={{ margin: "12px 18px 0", padding: "16px", background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 16 }}>
@@ -746,3 +1024,156 @@ export default function LifePathAI() {
               </div>
             )}
           </div>
+
+          <div style={{ padding: "22px 0 0" }}>
+            <div style={{ padding: "0 18px 11px", color: "#1e293b", fontSize: 9, fontWeight: 700, letterSpacing: 3 }}>RECOMMENDED FOR YOU</div>
+            <div className="sx" style={{ paddingLeft: 18 }}>
+              <div style={{ display: "flex", gap: 11, paddingRight: 18, width: "max-content" }}>
+                {AFFS.map((a, i) => (
+                  <a key={i} href={a.url} target="_blank" rel="noopener noreferrer"
+                    style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 14px", background: "rgba(255,255,255,.022)", border: "1px solid rgba(255,255,255,.065)", borderRadius: 16, width: 230, flexShrink: 0 }}>
+                    <div style={{ width: 38, height: 38, borderRadius: 10, background: `${a.color}18`, border: `1px solid ${a.color}33`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>{a.icon}</div>
+                    <div>
+                      <div style={{ color: "#e2e8f0", fontWeight: 700, fontSize: 11, marginBottom: 2 }}>{a.title}</div>
+                      <div style={{ color: "#475569", fontSize: 9, lineHeight: 1.4, marginBottom: 4 }}>{a.desc}</div>
+                      <span style={{ padding: "2px 7px", borderRadius: 100, fontSize: 8, fontWeight: 700, color: a.color, background: `${a.color}18`, border: `1px solid ${a.color}33` }}>{a.tag}</span>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ margin: "20px 18px", padding: 16, background: "rgba(255,255,255,.012)", border: "1px dashed rgba(255,255,255,.05)", borderRadius: 14, textAlign: "center", minHeight: 80, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div><div style={{ color: "#1e293b", fontSize: 9, letterSpacing: 2, marginBottom: 4 }}>ADVERTISEMENT</div><div style={{ color: "#0f172a", fontSize: 9 }}>Google AdSense · 320×90</div></div>
+          </div>
+
+          <div style={{ textAlign: "center", padding: "0 18px 10px", display: "flex", justifyContent: "center", gap: 20 }}>
+            <a href="/privacy" style={{ color: "#334155", fontSize: 9 }}>Privacy Policy</a>
+            <a href="/terms" style={{ color: "#334155", fontSize: 9 }}>Terms of Service</a>
+          </div>
+          <div style={{ textAlign: "center", padding: "4px 18px 40px", color: "#1e293b", fontSize: 9, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace" }}>
+            LIFEPATH AI · POWERED BY GEMINI · 🇮🇳
+          </div>
+        </div>
+      )}
+
+      {/* CHAT */}
+      {screen === "chat" && pillar && (
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", zIndex: 1 }}>
+          <div style={{ padding: "11px 14px", background: "rgba(6,11,20,.97)", borderBottom: "1px solid rgba(255,255,255,.05)", backdropFilter: "blur(24px)", display: "flex", alignItems: "center", gap: 10, position: "sticky", top: 0, zIndex: 10 }}>
+            <button className="btn" onClick={() => setScreen("home")}
+              style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 11, width: 34, height: 34, color: "#64748b", fontSize: 17, display: "flex", alignItems: "center", justifyContent: "center" }}>‹</button>
+            <div style={{ width: 30, height: 30, borderRadius: 9, background: `rgba(${pillar.rgb},.1)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>{pillar.icon}</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ color: "#dde4ee", fontWeight: 700, fontSize: 12 }}>{pillar.label}</div>
+              <div style={{ color: "#334155", fontSize: 9 }}>{memory.selectedGoal || pillar.sub}</div>
+            </div>
+            {streak > 0 && (
+              <div style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 100, padding: "3px 9px", display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ fontSize: 12 }}>🔥</span>
+                <span style={{ color: "#f59e0b", fontWeight: 700, fontSize: 11 }}>{streak}</span>
+              </div>
+            )}
+            <button className="btn" onClick={() => setShowGoalSelector(true)}
+              style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 9, padding: "5px 9px", color: "#475569", fontSize: 9 }}>🎯</button>
+            <button className="btn" onClick={() => setShowDashboard(true)}
+              style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 9, padding: "5px 9px", color: "#475569", fontSize: 9 }}>📊</button>
+            <button className="btn" onClick={clearChat}
+              style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 9, padding: "5px 9px", color: "#475569", fontSize: 9 }}>Clear</button>
+            <div style={{ background: "rgba(6,182,212,.07)", border: "1px solid rgba(6,182,212,.2)", borderRadius: 100, padding: "3px 9px", display: "flex", alignItems: "center", gap: 4 }}>
+              <div style={{ width: 4, height: 4, borderRadius: "50%", background: "#06b6d4", animation: "pulse 2s infinite" }} />
+              <span style={{ color: "#06b6d4", fontSize: 9, fontWeight: 700 }}>LIVE</span>
+            </div>
+          </div>
+
+          <div style={{ flex: 1, overflowY: "auto", padding: "16px 13px" }}>
+            {curMsgs.map((msg, i) => {
+              const isAI = msg.role === "assistant";
+              if (!isAI) return (
+                <div key={i} style={{ marginBottom: 14, display: "flex", justifyContent: "flex-end", animation: "fadeUp .3s both" }}>
+                  <div style={{ background: `linear-gradient(135deg,${pillar.color},${pillar.color}bb)`, borderRadius: "16px 16px 4px 16px", padding: "11px 15px", maxWidth: "82%", color: "#fff", fontSize: 13, lineHeight: 1.65, whiteSpace: "pre-wrap" }}>
+                    {msg.content?.length > 500 ? msg.content.substring(0, 500) + "..." : msg.content}
+                  </div>
+                </div>
+              );
+              return (
+                <div key={i} style={{ marginBottom: 16, animation: "fadeUp .3s both" }}>
+                  {msg.structured ? (
+                    <TaskCard
+                      data={msg.structured}
+                      pillar={pillar}
+                      onShare={() => setShareData(msg.structured?.task || "")}
+                      onTaskDone={() => handleTaskDone(pillar.id)}
+                      onFillInput={fillInput}
+                    />
+                  ) : msg.content ? (
+                    <div style={{ background: "rgba(255,255,255,.022)", border: "1px solid rgba(255,255,255,.065)", borderRadius: "4px 16px 16px 16px", padding: "14px", maxWidth: "98%" }}>
+                      <div style={{ color: "#06b6d4", fontSize: 9, letterSpacing: 2.5, fontWeight: 700, marginBottom: 10, fontFamily: "'JetBrains Mono',monospace" }}>🛡️ LIFEPATH AI</div>
+                      <div style={{ color: "#94a3b8", fontSize: 13, lineHeight: 1.75, whiteSpace: "pre-wrap" }}>{msg.content}</div>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+
+            {loading && (
+              <div style={{ background: "rgba(255,255,255,.022)", border: "1px solid rgba(255,255,255,.065)", borderRadius: "4px 16px 16px 16px", padding: "12px 16px", display: "inline-flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                <span style={{ color: "#06b6d4", fontSize: 9, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace" }}>ANALYZING</span>
+                {[0,1,2].map(i => <div key={i} style={{ width: 5, height: 5, borderRadius: "50%", background: "#06b6d4", animation: `dot 1.3s ${i*.22}s infinite` }} />)}
+              </div>
+            )}
+            <div ref={bottomRef} />
+          </div>
+
+          <div style={{ padding: "10px 13px 28px", background: "rgba(6,11,20,.97)", borderTop: "1px solid rgba(255,255,255,.04)", backdropFilter: "blur(24px)" }}>
+            {cvFile && (
+              <div style={{ marginBottom: 9, padding: "7px 13px", background: "rgba(6,182,212,.07)", border: "1px solid rgba(6,182,212,.2)", borderRadius: 10, color: "#06b6d4", fontSize: 11, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>📎 {cvFile.name}</span>
+                <button onClick={() => { setCvFile(null); setInput(""); }} style={{ background: "none", border: "none", color: "#ef4444", fontSize: 13, cursor: "pointer" }}>✕</button>
+              </div>
+            )}
+
+            {/* ── FEEDBACK BUTTON ── */}
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+              <button onClick={() => setShowInterview(true)}
+                style={{ padding: "5px 12px", background: "rgba(99,102,241,.08)", border: "1px solid rgba(99,102,241,.2)", borderRadius: 100, color: "#6366f1", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                💬 Give Detailed Feedback
+              </button>
+            </div>
+
+            <div style={{ color: "#1e293b", fontSize: 9, textAlign: "right", marginBottom: 5, fontFamily: "'JetBrains Mono',monospace" }}>
+              Enter = new line &nbsp;·&nbsp; Shift+Enter = send
+            </div>
+            <div style={{ display: "flex", gap: 9, alignItems: "flex-end" }}>
+              {pillar?.id === "cv" && (
+                <>
+                  <input ref={fileRef} type="file" accept=".txt,.doc,.docx,.pdf" onChange={handleFileUpload} style={{ display: "none" }} />
+                  <button className="btn" onClick={() => fileRef.current?.click()}
+                    style={{ width: 44, height: 44, borderRadius: 13, flexShrink: 0, background: "rgba(6,182,212,.08)", border: "1px solid rgba(6,182,212,.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19 }}>📎</button>
+                </>
+              )}
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={handleKey}
+                placeholder="Type here... (tap an example above to fill)"
+                rows={3}
+                style={{ flex: 1, background: "rgba(255,255,255,.03)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 14, padding: "11px 13px", color: "#e2e8f0", fontSize: 13, resize: "none", lineHeight: 1.55, transition: "border-color .2s" }}
+                onFocus={e => e.target.style.borderColor = pillar.color + "66"}
+                onBlur={e => e.target.style.borderColor = "rgba(255,255,255,.07)"} />
+              <button className="btn" onClick={sendMessage} disabled={loading || !input.trim()}
+                style={{ width: 44, height: 44, borderRadius: 13, flexShrink: 0, background: loading || !input.trim() ? "rgba(255,255,255,.04)" : `linear-gradient(135deg,${pillar.color},${pillar.color}88)`, border: "none", cursor: loading || !input.trim() ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19, boxShadow: !loading && input.trim() ? `0 4px 16px rgba(${pillar.rgb},.3)` : "none" }}>
+                {loading ? "⏳" : "↑"}
+              </button>
+            </div>
+            <div style={{ color: "#1e293b", fontSize: 8, textAlign: "center", marginTop: 6, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace" }}>
+              LIFEPATH AI · YOUR GROWTH COACH · 🇮🇳
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+        }
