@@ -1,7 +1,7 @@
 "use client";
 import { useState, useRef, useEffect, useCallback } from "react";
-import FeedbackPrompt from "@/components/FeedbackPrompt";
-import InterviewForm from "@/components/InterviewForm";
+import FeedbackPrompt from "../components/FeedbackPrompt";
+import InterviewForm from "../components/InterviewForm";
 
 const S = {
   get: (k, fb = null) => { try { const d = localStorage.getItem(k); return d ? JSON.parse(d) : fb; } catch { return fb; } },
@@ -512,7 +512,6 @@ export default function LifePathAI() {
   const [showDashboard, setShowDashboard] = useState(false);
   const [showGoalSelector, setShowGoalSelector] = useState(false);
 
-  // ── FEEDBACK SYSTEM STATE ──
   const [showFeedback, setShowFeedback] = useState(false);
   const [showInterview, setShowInterview] = useState(false);
   const [feedbackShown, setFeedbackShown] = useState(() => S.get("lp_feedback_shown", false));
@@ -668,7 +667,6 @@ export default function LifePathAI() {
     }
     setLoading(false);
 
-    // ── FEEDBACK TRIGGER: Track message count and show feedback after 5 messages ──
     const newCount = msgCount + 1;
     setMsgCount(newCount);
     S.set("lp_msg_count", newCount);
@@ -769,7 +767,6 @@ export default function LifePathAI() {
       {showDashboard && pillar && <ProgressDashboard memory={memory} pillar={pillar} onClose={() => setShowDashboard(false)} />}
       {showGoalSelector && pillar && <GoalSelector pillarId={pillar.id} pillarColor={pillar.color} pillarRgb={pillar.rgb} onSelect={handleGoalSelect} onClose={() => setShowGoalSelector(false)} />}
 
-      {/* ── FEEDBACK SYSTEM RENDER ── */}
       {showFeedback && pillar && (
         <FeedbackPrompt pillar={pillar} onClose={() => setShowFeedback(false)} onDone={() => setShowFeedback(false)} />
       )}
@@ -777,7 +774,6 @@ export default function LifePathAI() {
         <InterviewForm pillar={pillar} onClose={() => setShowInterview(false)} />
       )}
 
-      {/* SPLASH */}
       {screen === "splash" && (
         <div style={{ position: "fixed", inset: 0, background: "#060b14", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 300 }}>
           <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
@@ -796,7 +792,6 @@ export default function LifePathAI() {
         </div>
       )}
 
-      {/* WELCOME */}
       {screen === "welcome" && (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", zIndex: 1 }}>
           <div style={{ width: "100%", background: "#0a1020", borderRadius: "24px 24px 0 0", padding: "32px 22px 48px", border: "1px solid rgba(255,255,255,0.07)" }}>
@@ -818,7 +813,6 @@ export default function LifePathAI() {
         </div>
       )}
 
-      {/* ONBOARDING */}
       {screen === "onboard" && !analyzing && (
         <div style={{ flex: 1, overflowY: "auto", padding: "40px 20px 60px", zIndex: 1 }}>
           <div style={{ textAlign: "center", marginBottom: 28 }}>
@@ -886,7 +880,6 @@ export default function LifePathAI() {
         </div>
       )}
 
-      {/* ANALYZING */}
       {analyzing && (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 1, padding: 40 }}>
           <div style={{ fontSize: 48, marginBottom: 20 }}>🛡️</div>
@@ -901,7 +894,6 @@ export default function LifePathAI() {
         </div>
       )}
 
-      {/* HOME */}
       {screen === "home" && (
         <div style={{ flex: 1, overflowY: "auto", zIndex: 1 }}>
           <div style={{ position: "fixed", top: -100, left: "50%", transform: "translateX(-50%)", width: 500, height: 500, borderRadius: "50%", pointerEvents: "none", background: "radial-gradient(circle,rgba(6,182,212,.035) 0%,transparent 65%)" }} />
@@ -1058,7 +1050,6 @@ export default function LifePathAI() {
         </div>
       )}
 
-      {/* CHAT */}
       {screen === "chat" && pillar && (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", zIndex: 1 }}>
           <div style={{ padding: "11px 14px", background: "rgba(6,11,20,.97)", borderBottom: "1px solid rgba(255,255,255,.05)", backdropFilter: "blur(24px)", display: "flex", alignItems: "center", gap: 10, position: "sticky", top: 0, zIndex: 10 }}>
@@ -1134,7 +1125,6 @@ export default function LifePathAI() {
               </div>
             )}
 
-            {/* ── FEEDBACK BUTTON ── */}
             <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
               <button onClick={() => setShowInterview(true)}
                 style={{ padding: "5px 12px", background: "rgba(99,102,241,.08)", border: "1px solid rgba(99,102,241,.2)", borderRadius: 100, color: "#6366f1", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
@@ -1176,4 +1166,4 @@ export default function LifePathAI() {
       )}
     </div>
   );
-        }
+            }
