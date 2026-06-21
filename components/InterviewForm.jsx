@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
-import { saveInterview } from "@/lib/feedback";
-import { getUserId } from "@/lib/session";
+import { saveInterview } from "../lib/feedback";
+import { getUserId } from "../lib/session";
 
 const QUESTIONS = [
   { key: "whyTried", label: "Why did you try LifePath AI today?" },
