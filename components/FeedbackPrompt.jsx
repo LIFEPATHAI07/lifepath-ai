@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
-import { saveFeedback } from "@/lib/feedback";
-import { getSessionId, getUserId } from "@/lib/session";
+import { saveFeedback } from "../lib/feedback";
+import { getSessionId, getUserId } from "../lib/session";
 
 const YES_REASONS = ["Useful Advice", "Clear Roadmap", "Motivation", "Other"];
 const NO_REASONS = ["Wrong Advice", "Confusing", "Didn't Solve My Problem", "Other"];
