@@ -454,12 +454,21 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone, onFillInput }) => {
         </div>
       )}
 
-      <div style={{ padding: "10px 16px", display: "flex", justifyContent: "flex-end" }}>
-        <button onClick={onShare}
-          style={{ padding: "6px 13px", background: "transparent", border: "1px solid rgba(255,255,255,.06)", borderRadius: 100, color: "#334155", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-          📤 Share this
-        </button>
-      </div>
+{data.task && (
+  <div style={{ padding: "10px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+    <div style={{ display: "flex", gap: 6 }}>
+      <span style={{ color: "#334155", fontSize: 10 }}>Helpful?</span>
+      <button onClick={() => onQuickFeedback?.("yes")}
+        style={{ padding: "4px 10px", background: "rgba(16,185,129,.08)", border: "1px solid rgba(16,185,129,.2)", borderRadius: 100, fontSize: 13, cursor: "pointer" }}>👍</button>
+      <button onClick={() => onQuickFeedback?.("no")}
+        style={{ padding: "4px 10px", background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)", borderRadius: 100, fontSize: 13, cursor: "pointer" }}>👎</button>
+    </div>
+    <button onClick={onShare}
+      style={{ padding: "6px 13px", background: "transparent", border: "1px solid rgba(255,255,255,.06)", borderRadius: 100, color: "#334155", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+      📤 Share this
+    </button>
+  </div>
+)}
     </div>
   );
 };
