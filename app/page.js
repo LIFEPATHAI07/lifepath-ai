@@ -1,7 +1,5 @@
 "use client";
 import { useState, useRef, useEffect, useCallback } from "react";
-import FeedbackPrompt from "../components/FeedbackPrompt";
-import InterviewForm from "../components/InterviewForm";
 
 const S = {
   get: (k, fb = null) => { try { const d = localStorage.getItem(k); return d ? JSON.parse(d) : fb; } catch { return fb; } },
@@ -454,21 +452,12 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone, onFillInput }) => {
         </div>
       )}
 
-{data.task && (
-  <div style={{ padding: "10px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-    <div style={{ display: "flex", gap: 6 }}>
-      <span style={{ color: "#334155", fontSize: 10 }}>Helpful?</span>
-      <button onClick={() => onQuickFeedback?.("yes")}
-        style={{ padding: "4px 10px", background: "rgba(16,185,129,.08)", border: "1px solid rgba(16,185,129,.2)", borderRadius: 100, fontSize: 13, cursor: "pointer" }}>👍</button>
-      <button onClick={() => onQuickFeedback?.("no")}
-        style={{ padding: "4px 10px", background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)", borderRadius: 100, fontSize: 13, cursor: "pointer" }}>👎</button>
-    </div>
-    <button onClick={onShare}
-      style={{ padding: "6px 13px", background: "transparent", border: "1px solid rgba(255,255,255,.06)", borderRadius: 100, color: "#334155", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-      📤 Share this
-    </button>
-  </div>
-)}
+      <div style={{ padding: "10px 16px", display: "flex", justifyContent: "flex-end" }}>
+        <button onClick={onShare}
+          style={{ padding: "6px 13px", background: "transparent", border: "1px solid rgba(255,255,255,.06)", borderRadius: 100, color: "#334155", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+          📤 Share this
+        </button>
+      </div>
     </div>
   );
 };
@@ -520,11 +509,6 @@ export default function LifePathAI() {
   const [showAllPillars, setShowAllPillars] = useState(false);
   const [showDashboard, setShowDashboard] = useState(false);
   const [showGoalSelector, setShowGoalSelector] = useState(false);
-
-  const [showFeedback, setShowFeedback] = useState(false);
-  const [showInterview, setShowInterview] = useState(false);
-  const [feedbackShown, setFeedbackShown] = useState(() => S.get("lp_feedback_shown", false));
-  const [msgCount, setMsgCount] = useState(() => S.get("lp_msg_count", 0));
 
   const bottomRef = useRef(null);
   const fileRef = useRef(null);
@@ -675,15 +659,6 @@ export default function LifePathAI() {
       setMessages(m => ({ ...m, [pillar.id]: [...newMsgs, { role: "assistant", content: `⚠️ ${err.message || "Connection error. Please retry."}`, structured: null }] }));
     }
     setLoading(false);
-
-    const newCount = msgCount + 1;
-    setMsgCount(newCount);
-    S.set("lp_msg_count", newCount);
-    if (newCount >= 5 && !feedbackShown) {
-      setTimeout(() => setShowFeedback(true), 1500);
-      setFeedbackShown(true);
-      S.set("lp_feedback_shown", true);
-    }
   };
 
   const handleKey = (e) => {
@@ -775,13 +750,6 @@ export default function LifePathAI() {
       {shareData && pillar && <ShareCard pillar={pillar} task={shareData} streak={streak} onClose={() => setShareData(null)} />}
       {showDashboard && pillar && <ProgressDashboard memory={memory} pillar={pillar} onClose={() => setShowDashboard(false)} />}
       {showGoalSelector && pillar && <GoalSelector pillarId={pillar.id} pillarColor={pillar.color} pillarRgb={pillar.rgb} onSelect={handleGoalSelect} onClose={() => setShowGoalSelector(false)} />}
-
-      {showFeedback && pillar && (
-        <FeedbackPrompt pillar={pillar} onClose={() => setShowFeedback(false)} onDone={() => setShowFeedback(false)} />
-      )}
-      {showInterview && pillar && (
-        <InterviewForm pillar={pillar} onClose={() => setShowInterview(false)} />
-      )}
 
       {screen === "splash" && (
         <div style={{ position: "fixed", inset: 0, background: "#060b14", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 300 }}>
@@ -1134,13 +1102,6 @@ export default function LifePathAI() {
               </div>
             )}
 
-            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
-              <button onClick={() => setShowInterview(true)}
-                style={{ padding: "5px 12px", background: "rgba(99,102,241,.08)", border: "1px solid rgba(99,102,241,.2)", borderRadius: 100, color: "#6366f1", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-                💬 Give Detailed Feedback
-              </button>
-            </div>
-
             <div style={{ color: "#1e293b", fontSize: 9, textAlign: "right", marginBottom: 5, fontFamily: "'JetBrains Mono',monospace" }}>
               Enter = new line &nbsp;·&nbsp; Shift+Enter = send
             </div>
@@ -1175,4 +1136,4 @@ export default function LifePathAI() {
       )}
     </div>
   );
-            }
+   }
