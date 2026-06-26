@@ -1,5 +1,8 @@
 "use client";
+"use client";
 import { useState, useRef, useEffect, useCallback } from "react";
+import { db } from "../lib/firebase";
+import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 
 const S = {
   get: (k, fb = null) => { try { const d = localStorage.getItem(k); return d ? JSON.parse(d) : fb; } catch { return fb; } },
