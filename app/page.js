@@ -538,6 +538,11 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone, onFillInput }) => {
     📤 Share this
   </button>
 </div>
+    </div>
+  );
+};
+
+const ShareCard = ({ pillar, task, streak, onClose }) => {
 
 const ShareCard = ({ pillar, task, streak, onClose }) => {
   const streakText = streak > 0 ? `🔥 ${streak} day streak!\n` : "";
