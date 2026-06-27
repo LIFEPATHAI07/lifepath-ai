@@ -293,7 +293,7 @@ const GoalSelector = ({ pillarId, pillarColor, pillarRgb, onSelect, onClose }) =
 
 const TaskCard = ({ data, pillar, onShare, onTaskDone, onFillInput }) => {
   const [done, setDone] = useState(false);
-  const [fbState, setFbState] = useState("idle"); // idle | showReasons | saved
+  const [fbState, setFbState] = useState("idle");
   if (!data) return null;
 
   const handlePositive = async () => {
@@ -492,52 +492,52 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone, onFillInput }) => {
       )}
 
       {data.task && fbState !== "saved" && (
-  <div style={{ padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,.04)" }}>
-    <div style={{ color: "#475569", fontSize: 11, fontWeight: 600, marginBottom: 10, textAlign: "center" }}>
-      Did LifePath AI help you?
-    </div>
-    {fbState === "idle" && (
-      <div style={{ display: "flex", gap: 10 }}>
-        <button onClick={handlePositive}
-          style={{ flex: 1, padding: "11px", background: "rgba(16,185,129,.08)", border: "1px solid rgba(16,185,129,.25)", borderRadius: 12, color: "#10b981", fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>
-          👍 Helpful
-        </button>
-        <button onClick={() => setFbState("showReasons")}
-          style={{ flex: 1, padding: "11px", background: "rgba(239,68,68,.07)", border: "1px solid rgba(239,68,68,.2)", borderRadius: 12, color: "#ef4444", fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>
-          👎 Not Helpful
+        <div style={{ padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,.04)" }}>
+          <div style={{ color: "#475569", fontSize: 11, fontWeight: 600, marginBottom: 10, textAlign: "center" }}>
+            Did LifePath AI help you?
+          </div>
+          {fbState === "idle" && (
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={handlePositive}
+                style={{ flex: 1, padding: "11px", background: "rgba(16,185,129,.08)", border: "1px solid rgba(16,185,129,.25)", borderRadius: 12, color: "#10b981", fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>
+                👍 Helpful
+              </button>
+              <button onClick={() => setFbState("showReasons")}
+                style={{ flex: 1, padding: "11px", background: "rgba(239,68,68,.07)", border: "1px solid rgba(239,68,68,.2)", borderRadius: 12, color: "#ef4444", fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>
+                👎 Not Helpful
+              </button>
+            </div>
+          )}
+          {fbState === "showReasons" && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              {["Wrong Advice", "Too Generic", "Confusing", "Didn't Solve My Problem"].map((r, i) => (
+                <button key={i} onClick={() => handleNegativeReason(r)}
+                  style={{ padding: "10px 8px", background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)", borderRadius: 10, color: "#94a3b8", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                  {r}
+                </button>
+              ))}
+            </div>
+          )}
+          {fbState === "saving" && (
+            <div style={{ textAlign: "center", color: "#475569", fontSize: 12 }}>Saving...</div>
+          )}
+        </div>
+      )}
+
+      {data.task && fbState === "saved" && (
+        <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,.04)", textAlign: "center" }}>
+          <span style={{ color: "#10b981", fontSize: 12, fontWeight: 600 }}>
+            🙏 Thanks for your feedback!
+          </span>
+        </div>
+      )}
+
+      <div style={{ padding: "10px 16px", display: "flex", justifyContent: "flex-end" }}>
+        <button onClick={onShare}
+          style={{ padding: "6px 13px", background: "transparent", border: "1px solid rgba(255,255,255,.06)", borderRadius: 100, color: "#334155", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+          📤 Share this
         </button>
       </div>
-    )}
-    {fbState === "showReasons" && (
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-        {["Wrong Advice", "Too Generic", "Confusing", "Didn't Solve My Problem"].map((r, i) => (
-          <button key={i} onClick={() => handleNegativeReason(r)}
-            style={{ padding: "10px 8px", background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)", borderRadius: 10, color: "#94a3b8", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-            {r}
-          </button>
-        ))}
-      </div>
-    )}
-    {fbState === "saving" && (
-      <div style={{ textAlign: "center", color: "#475569", fontSize: 12 }}>Saving...</div>
-    )}
-  </div>
-)}
-
-{data.task && fbState === "saved" && (
-  <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,.04)", textAlign: "center" }}>
-    <span style={{ color: "#10b981", fontSize: 12, fontWeight: 600 }}>
-      🙏 Thanks for your feedback!
-    </span>
-  </div>
-)}
-
-<div style={{ padding: "10px 16px", display: "flex", justifyContent: "flex-end" }}>
-  <button onClick={onShare}
-    style={{ padding: "6px 13px", background: "transparent", border: "1px solid rgba(255,255,255,.06)", borderRadius: 100, color: "#334155", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-    📤 Share this
-  </button>
-</div>
     </div>
   );
 };
