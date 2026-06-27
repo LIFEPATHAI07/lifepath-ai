@@ -7,7 +7,31 @@ const S = {
   get: (k, fb = null) => { try { const d = localStorage.getItem(k); return d ? JSON.parse(d) : fb; } catch { return fb; } },
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
+const getUserId = () => {
+  if (typeof window === "undefined") return "ssr";
+  let uid = S.get("lp_uid", null);
+  if (!uid) {
+    uid = `user_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    S.set("lp_uid", uid);
+  }
+  return uid;
+};
 
+const saveFeedback = async ({ rating, reason, pillar }) => {
+  try {
+    await addDoc(collection(db, "feedback"), {
+      userId: getUserId(),
+      pillar: pillar || "unknown",
+      rating,
+      reason: reason || "",
+      timestamp: serverTimestamp(),
+    });
+    return true;
+  } catch (e) {
+    console.error("Feedback save error:", e);
+    return false;
+  }
+};
 const FREE_LIMIT = 100;
 const getUsage = () => {
   const today = new Date().toDateString();
