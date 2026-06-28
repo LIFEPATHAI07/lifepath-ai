@@ -7,6 +7,7 @@ const S = {
   get: (k, fb = null) => { try { const d = localStorage.getItem(k); return d ? JSON.parse(d) : fb; } catch { return fb; } },
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
+
 const getUserId = () => {
   if (typeof window === "undefined") return "ssr";
   let uid = S.get("lp_uid", null);
@@ -32,6 +33,7 @@ const saveFeedback = async ({ rating, reason, pillar }) => {
     return false;
   }
 };
+
 const FREE_LIMIT = 100;
 const getUsage = () => {
   const today = new Date().toDateString();
@@ -541,8 +543,6 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone, onFillInput }) => {
     </div>
   );
 };
-
-const ShareCard = ({ pillar, task, streak, onClose }) => {
 
 const ShareCard = ({ pillar, task, streak, onClose }) => {
   const streakText = streak > 0 ? `🔥 ${streak} day streak!\n` : "";
@@ -1218,4 +1218,4 @@ export default function LifePathAI() {
       )}
     </div>
   );
-   }
+                                           }
