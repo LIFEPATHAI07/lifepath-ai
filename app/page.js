@@ -19,18 +19,34 @@ const getUserId = () => {
 };
 
 const saveFeedback = async ({ rating, reason, pillar }) => {
+  console.log("=== FEEDBACK DEBUG START ===");
+  console.log("1. saveFeedback called with:", { rating, reason, pillar });
+  console.log("2. db object:", db);
+  console.log("3. userId:", getUserId());
+
   try {
-    await addDoc(collection(db, "feedback"), {
+    const colRef = collection(db, "feedback");
+    console.log("4. Collection reference created:", colRef);
+
+    const docData = {
       userId: getUserId(),
       pillar: pillar || "unknown",
       rating,
       reason: reason || "",
       timestamp: serverTimestamp(),
-    });
-    return true;
+    };
+    console.log("5. Document data to save:", docData);
+
+    const docRef = await addDoc(colRef, docData);
+    console.log("6. SUCCESS! Document written with ID:", docRef.id);
+    console.log("=== FEEDBACK DEBUG END (SUCCESS) ===");
+    return { success: true, id: docRef.id };
   } catch (e) {
-    console.error("Feedback save error:", e);
-    return false;
+    console.error("6. FIREBASE ERROR CODE:", e.code);
+    console.error("6. FIREBASE ERROR MESSAGE:", e.message);
+    console.error("6. FULL ERROR OBJECT:", e);
+    console.log("=== FEEDBACK DEBUG END (FAILED) ===");
+    return { success: false, error: e.message || "Unknown error" };
   }
 };
 
@@ -298,17 +314,31 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone, onFillInput }) => {
   const [fbState, setFbState] = useState("idle");
   if (!data) return null;
 
-  const handlePositive = async () => {
-    setFbState("saving");
-    await saveFeedback({ rating: "positive", pillar: pillar.id });
-    setFbState("saved");
-  };
+  const [fbError, setFbError] = useState("");
 
-  const handleNegativeReason = async (reason) => {
-    setFbState("saving");
-    await saveFeedback({ rating: "negative", reason, pillar: pillar.id });
+const handlePositive = async () => {
+  setFbState("saving");
+  setFbError("");
+  const result = await saveFeedback({ rating: "positive", pillar: pillar.id });
+  if (result.success) {
     setFbState("saved");
-  };
+  } else {
+    setFbState("error");
+    setFbError(result.error);
+  }
+};
+
+const handleNegativeReason = async (reason) => {
+  setFbState("saving");
+  setFbError("");
+  const result = await saveFeedback({ rating: "negative", reason, pillar: pillar.id });
+  if (result.success) {
+    setFbState("saved");
+  } else {
+    setFbState("error");
+    setFbError(result.error);
+  }
+};
 
   const renderSteps = (text) => {
     if (!text) return null;
@@ -525,6 +555,11 @@ const TaskCard = ({ data, pillar, onShare, onTaskDone, onFillInput }) => {
           )}
         </div>
       )}
+{fbState === "error" && (
+  <div style={{ textAlign: "center", color: "#ef4444", fontSize: 11, padding: "8px", background: "rgba(239,68,68,.06)", borderRadius: 8, marginTop: 6 }}>
+    ❌ Error: {fbError}
+  </div>
+)}
 
       {data.task && fbState === "saved" && (
         <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,.04)", textAlign: "center" }}>
