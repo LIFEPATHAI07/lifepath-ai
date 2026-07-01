@@ -2,21 +2,13 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { db } from "../lib/firebase";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { getUserId } from "../lib/user";
 
 const S = {
   get: (k, fb = null) => { try { const d = localStorage.getItem(k); return d ? JSON.parse(d) : fb; } catch { return fb; } },
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
 
-const getUserId = () => {
-  if (typeof window === "undefined") return "ssr";
-  let uid = S.get("lp_uid", null);
-  if (!uid) {
-    uid = `user_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    S.set("lp_uid", uid);
-  }
-  return uid;
-};
 
 const saveFeedback = async ({ rating, reason, pillar }) => {
   console.log("=== FEEDBACK DEBUG START ===");
