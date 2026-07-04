@@ -764,23 +764,19 @@ export default function LifePathAI() {
       }
 
       setMessages(m => ({ ...m, [pillar.id]: [...newMsgs, aiMsg] }));
-    } catch (err) {
+  } catch (err) {
       setMessages(m => ({ ...m, [pillar.id]: [...newMsgs, { role: "assistant", content: `⚠️ ${err.message || "Connection error. Please retry."}`, structured: null }] }));
+    } finally {
+      setLoading(false);
     }
-  } finally {
-  setLoading(false);
-}
-};
+  };
 
   const handleKey = (e) => {
-  if (e.key === "Enter" && e.shiftKey) {
-    e.preventDefault();
-
-    if (!loading) {
-      sendMessage();
+    if (e.key === "Enter" && e.shiftKey) {
+      e.preventDefault();
+      if (!loading) sendMessage();
     }
-  }
-};
+  };
 
   const clearChat = () => {
     if (!pillar) return;
