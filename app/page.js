@@ -753,7 +753,7 @@ export default function LifePathAI() {
         body: JSON.stringify({ messages: apiMessages, pillarId: pillar.id, profile: { ...profile, ...currentMemory } })
       });
       const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      if (data.error) throw new Error(data.message || "Connection error. Please retry.");
 
       const aiMsg = { role: "assistant", content: data.reply || null, structured: data.structured || null };
 
@@ -767,12 +767,20 @@ export default function LifePathAI() {
     } catch (err) {
       setMessages(m => ({ ...m, [pillar.id]: [...newMsgs, { role: "assistant", content: `⚠️ ${err.message || "Connection error. Please retry."}`, structured: null }] }));
     }
-    setLoading(false);
-  };
+  } finally {
+  setLoading(false);
+}
+};
 
   const handleKey = (e) => {
-    if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); sendMessage(); }
-  };
+  if (e.key === "Enter" && e.shiftKey) {
+    e.preventDefault();
+
+    if (!loading) {
+      sendMessage();
+    }
+  }
+};
 
   const clearChat = () => {
     if (!pillar) return;
