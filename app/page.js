@@ -764,7 +764,7 @@ export default function LifePathAI() {
       }
 
       setMessages(m => ({ ...m, [pillar.id]: [...newMsgs, aiMsg] }));
-  } catch (err) {
+    } catch (err) {
       setMessages(m => ({ ...m, [pillar.id]: [...newMsgs, { role: "assistant", content: `⚠️ ${err.message || "Connection error. Please retry."}`, structured: null }] }));
     } finally {
       setLoading(false);
@@ -777,7 +777,6 @@ export default function LifePathAI() {
       if (!loading) sendMessage();
     }
   };
-
   const clearChat = () => {
     if (!pillar) return;
     setMessages(m => { const u = { ...m }; delete u[pillar.id]; S.set("lp_chat_history", u); return u; });
