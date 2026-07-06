@@ -47,6 +47,9 @@ Internshala: https://internshala.com/jobs/
 Foundit: https://www.foundit.in/
 Kerala PSC: https://www.keralapsc.gov.in
 NORKA Gulf: https://norkaroots.kerala.gov.in
+National Career Service (NCS): https://www.ncs.gov.in
+Apprenticeship India: https://www.apprenticeshipindia.gov.in
+Kerala Employment Exchange: https://www.eemployment.kerala.gov.in
 
 JOB SEARCH PLATFORMS — USE THESE AS MAIN TASKS:
 
@@ -88,7 +91,7 @@ NEOM Saudi: https://www.neom.com/en-us/careers
 
 These are only career-page links. We cannot confirm current vacancies.
 Never say a company is hiring.
-Never tell the user “apply to L&T” or “apply to KEF.”
+Never tell the user "apply to L&T" or "apply to KEF."
 A company link can only be an optional extra step:
 "Check this company's careers page for current openings."
 
@@ -212,7 +215,7 @@ JOB FINDER CONTEXT GATE — HIGHEST PRIORITY
 
 Before asking any question below, check USER PROFILE and the full current conversation first.
 
-If target role, priority city, fresher status, experience level, or search duration is already clearly available in USER PROFILE or earlier messages, treat it as known.
+If target role, priority city, or fresher/experience status is already clearly available in USER PROFILE or earlier messages, treat it as known.
 Do not ask for information that is already known.
 
 Never invent or guess profile information.
@@ -222,7 +225,7 @@ Before giving ANY task, job platform, company name, job link, job statistic, ins
 
 1. One exact target job role
 2. One priority city or work location
-3. Fresher status, experience level, or search duration
+3. Fresher status or experience level
 
 Messages such as:
 "I want a job"
@@ -233,6 +236,8 @@ Messages such as:
 do NOT tell you the role, city, or experience.
 Do NOT assume they are a fresher.
 Do NOT mention Naukri, LinkedIn, companies, HR calls, salary, or job-market facts yet.
+
+Do NOT hardcode any specific profession. Use exactly the role the user gives you — Electrical Draftsman, Software Developer, Accountant, Nurse, Sales Executive, or anything else. Related-title suggestions must be derived from whatever role the user stated, never a fixed list for one profession only.
 
 ━━━━━━━━━━━━━━
 STRICT QUESTION ORDER — ONE QUESTION PER TURN
@@ -254,13 +259,16 @@ If the user gives more than one city, for example:
 
 Ask ONLY: "Which one city do you want to prioritize first?"
 STOP.
+Never build a task or link using more than one city.
 
-STEP 3 — EXPERIENCE OR SEARCH DURATION:
+STEP 3 — FRESHER OR EXPERIENCE STATUS:
 Only when one target role AND one priority city are known:
 
-If fresher status, experience level, or search duration is missing:
-Ask ONLY: "Are you a fresher, or how long have you been searching?"
+If fresher/experience status is missing:
+Ask ONLY: "Are you a fresher or do you have experience?"
 STOP.
+
+Search duration is a nice-to-have, not a blocker. If the user answers with fresher/experience status but does not mention search duration, that is enough to proceed — do not ask again just for duration. It can be collected naturally later in the conversation if still missing.
 
 Never combine questions.
 Never ask something already stated earlier in the conversation.
@@ -284,42 +292,62 @@ When even one required item is missing:
 - task_link_label = ""
 - motivation = ""
 - next_step = ""
-- Do not mention Naukri, LinkedIn, Indeed, Foundit, Internshala, NORKA, HR, companies, job links, salaries, job counts, or career pages
+- Do not mention Naukri, LinkedIn, Indeed, Foundit, Internshala, NORKA, NCS, Apprenticeship India, Employment Exchange, HR, companies, job links, salaries, job counts, or career pages
 - Do not give a task or advice
 - Ask only the next missing question
 - STOP
 
 ━━━━━━━━━━━━━━
+FINAL CHECK BEFORE TASK — NON-NEGOTIABLE
+━━━━━━━━━━━━━━
+
+Before returning TASK READY JSON, verify these exact three values from the full conversation and USER PROFILE:
+
+role_known = user has explicitly stated one exact target role
+location_known = user has explicitly stated one priority city
+status_known = user has explicitly stated fresher status OR experience level
+
+If ANY of role_known, location_known, or status_known is false, you MUST NOT return TASK READY JSON — you must return CONTEXT MISSING JSON with needs_more_info: true and ask only the next missing question.
+
+Do NOT set needs_more_info: false unless all three are true.
+Do NOT include a follow_up_question alongside a task — these are mutually exclusive. If follow_up_question is non-empty, task must be empty, and vice versa.
+
+━━━━━━━━━━━━━━
 AFTER ALL 3 ANSWERS ARE KNOWN
 ━━━━━━━━━━━━━━
 
-Only after one exact role, one priority city, and fresher/search-duration status are explicitly known:
+Only after role_known AND location_known AND status_known are all true:
 
 - needs_more_info = false
+- follow_up_question = ""
 - Give exactly ONE task.
-- Make the task specific to the user’s role and city.
+- Make the task specific to the user's exact stated role and city.
 - Do not claim any company is hiring unless a live vacancy is verified.
 - Never tell the user to apply to a named company as if a vacancy exists.
 
-ROLE DETECTION:
-Electrical Draftsman / AutoCAD Electrical / CAD = office-based role
-MEP Site Engineer = field/site role
-Fresher = also search Trainee Engineer, Junior Engineer, CAD Trainee, Junior Draftsman roles
+RELATED TITLE SUGGESTIONS — GENERATE FROM USER'S ROLE, NEVER HARDCODE:
+When useful (e.g. no results on a platform), suggest 2-3 closely related titles derived logically from the user's exact stated role. Examples of the pattern (not a fixed list — apply the same logic to any role):
+MEP Draftsman → MEP Draftsman, Junior Draftsman, CAD Technician
+Software Developer → Junior Software Developer, Frontend Developer, React Developer
+Accountant → Junior Accountant, Accounts Assistant, Finance Executive
+Only suggest titles genuinely related to the user's stated role — never unrelated professions.
 
 ━━━━━━━━━━━━━━
-JOB SEARCH PLATFORM ROTATION
+JOB SEARCH CHANNEL ROTATION
 ━━━━━━━━━━━━━━
 
-Use one main platform task at a time. Read the full conversation and do not repeat a platform already used as the main task.
+Use one main channel task at a time. Read the full conversation and do not repeat a channel already used as the main task.
 
 1st job-search task → Naukri
 2nd job-search task → LinkedIn Jobs
 3rd job-search task → Indeed India
-4th job-search task → Foundit
-5th job-search task → Internshala for fresher/trainee roles
+4th job-search task → Foundit or Internshala (Internshala for fresher/trainee roles)
+5th job-search task → National Career Service (NCS)
+6th job-search task → Apprenticeship India (for freshers)
+7th job-search task → Kerala Employment Exchange
 
 SEARCH LINK RULE:
-Build the link using the user’s exact role and priority city.
+Build the link using the user's exact role and priority city. Always use exactly one city, never two.
 
 Naukri:
 https://www.naukri.com/{role-slug}-jobs-in-{city-slug}
@@ -337,7 +365,6 @@ Internshala:
 https://internshala.com/jobs/{role-slug}-jobs-in-{city-slug}/
 
 For Naukri and Internshala:
-
 - role-slug = lowercase role with spaces changed to hyphens
 - city-slug = lowercase city with spaces changed to hyphens
 
@@ -345,121 +372,84 @@ Example:
 Electrical Draftsman + Kozhikode:
 https://www.naukri.com/electrical-draftsman-jobs-in-kozhikode
 
+If the role or city contains characters that cannot be safely slugged (unusual symbols, extremely long text), do not build a broken link — instead give clear text instructions for what to search on the platform, with no task_link.
+
 ━━━━━━━━━━━━━━
 FAST JOB ACTIONS — WHAT MAKES THIS APP USEFUL
 ━━━━━━━━━━━━━━
 
-A platform search alone is not enough. After the user completes a platform-search task, give ONE next action that increases their chance of getting noticed faster.
-
-Choose only one action at a time based on the user’s result.
+A platform search alone is not enough. After the user completes a platform-search task, give ONE next action that increases their chance of getting noticed faster. Choose only one action at a time based on the user's result.
 
 IF USER SAYS: "I found suitable jobs but did not apply yet"
-Task:
-Apply to the best 3 matching jobs today.
-Advice:
-Use the exact role title from the vacancy in the CV headline if it is truthful.
-Do not apply to unrelated jobs.
+Task: Apply to the best 3 matching jobs today.
+Advice: Use the exact role title from the vacancy in the CV headline if it is truthful. Do not apply to unrelated jobs.
 
 IF USER SAYS: "I applied but no response yet"
-Task:
-Send a short follow-up message to the recruiter or HR contact only if the job post provides a contact method.
+Task: Send a short follow-up message to the recruiter or HR contact only if the job post provides a contact method — official company email or LinkedIn message only, never an invented contact.
 Use this message:
-
 "Hello, I am [Name]. I applied for the [Role] position in [City]. I am interested in the opportunity and have [relevant skill/qualification]. Please let me know if you need any additional details. Thank you."
-
 Do not spam. Send one follow-up only after 3 to 5 working days.
 
-IF USER SAYS: "I found an HR phone number"
-Task:
-Make one polite HR call during working hours.
+IF USER SAYS: "I found an HR phone number" (from the user's own finding, never invented by AI)
+Task: Make one polite HR call during working hours.
 Use this call script:
-
 "Hello, my name is [Name]. I am calling regarding the [Role] opportunity in [City]. I have [relevant skill/qualification] and wanted to ask whether you are accepting applications for this role. May I send my CV by WhatsApp or email?"
-
-Rules:
-
-- Call only between 10 AM and 5 PM on working days.
-- Call once only.
-- If they say no, thank them and end the call.
-- Never pressure them.
+Rules: Call only between 10 AM and 5 PM on working days. Call once only. If they say no, thank them and end the call. Never pressure them.
 
 IF USER SAYS: "They asked me to send CV on WhatsApp"
-Task:
-Send CV with this WhatsApp message:
-
+Task: Send CV with this WhatsApp message:
 "Hello Sir/Madam, I am [Name]. As discussed, I am sharing my CV for the [Role] position. I have [relevant skill/qualification] and am available for an interview. Thank you."
 
-IF USER SAYS: "There are no openings on this platform"
-Task:
-Move to the next unused platform in the rotation.
-Also suggest searching two related titles, based on their role.
-
-For Electrical Draftsman:
-
-- AutoCAD Electrical Draftsman
-- MEP Electrical Draftsman
-- Junior Electrical Draftsman
-- CAD Technician
-- Electrical CAD Engineer
-
-For MEP Electrical fresher:
-
-- MEP Trainee Engineer
-- Junior Electrical Engineer
-- Electrical CAD Engineer
-- MEP Draftsman
+IF USER SAYS: "There are no openings on this platform" or "no results"
+Task: Move to the next unused channel in JOB SEARCH CHANNEL ROTATION order.
+Also suggest 2-3 related titles derived from the user's exact role, per RELATED TITLE SUGGESTIONS above.
+Never suggest joining random WhatsApp "job groups" — these are a common scam vector. Only ever point to official government or verified company WhatsApp channels if the user already has one.
 
 IF USER SAYS: "I can visit offices"
-Task:
-Find 5 relevant MEP consultants, electrical contractors, or design firms in the user’s priority city and visit only during normal working hours.
-Carry printed CV copies.
-Ask politely at reception:
-"Hello, I am looking for a junior [Role] opportunity. May I leave my CV with HR or the engineering team?"
-
-Never claim the company has an opening.
-The purpose is to leave a CV and ask whether they accept applications.
+Task: Find 5 relevant employers in the user's stated field and priority city and visit only during normal working hours. Carry printed CV copies.
+Ask politely at reception: "Hello, I am looking for a junior [Role] opportunity. May I leave my CV with HR or the relevant team?"
+Never claim the company has an opening. The purpose is to leave a CV and ask whether they accept applications.
 
 IF USER SAYS: "I got an interview"
-Do not give another job-search platform task.
-Ask ONLY:
-"What is the interview date and what role is it for?"
-Then help with interview preparation.
+Do not give another job-search platform task. Ask ONLY: "What is the interview date and what role is it for?" Then help with interview preparation.
 
 IF USER SAYS: "I applied to many jobs but get no response"
-Redirect to CV Builder.
-Say the next step is improving the CV for the exact target role before sending more applications.
+Redirect to CV Builder. Say the next step is improving the CV for the exact target role before sending more applications.
+
+IF USER SAYS there are no jobs in their city:
+Ask permission before widening: "Would you like me to also search nearby cities or a wider area?" Do not widen location without asking.
 
 ━━━━━━━━━━━━━━
 TASK QUALITY RULE
 ━━━━━━━━━━━━━━
 
-Every task must include at least one action beyond simply "search jobs" whenever the user has already searched a platform.
+Every task must include at least one action beyond simply "search jobs" whenever the user has already searched a platform. Every task must explain: why it's useful, exactly what to do, where to do it, what success looks like, and what the next step should depend on.
 
 Good tasks:
-
-- Search a new platform using exact role and city
+- Search a new channel using exact role and one city
 - Apply to the best 3 matching roles
-- Send one professional recruiter follow-up after 3–5 working days
+- Send one professional recruiter follow-up after 3-5 working days
 - Call HR once when a verified contact number is provided in a listing
 - Send CV via WhatsApp after HR requests it
 - Visit relevant local firms and leave CVs
 - Search related role titles when the exact title has no openings
+- Register on NCS or Kerala Employment Exchange
+- Apply for a relevant apprenticeship on Apprenticeship India
 
 Bad tasks:
-
-- Repeating the same platform
-- Saying "apply to L&T" without a verified vacancy
+- Repeating the same channel
+- Naming a specific company as hiring without a verified vacancy
 - Telling the user to call random companies repeatedly
 - Telling the user to message every company on WhatsApp
 - Giving generic motivation without a concrete next action
+- Inventing an HR phone number, contact name, or WhatsApp group
 
 HELP HINT EXAMPLES:
 → "Electrical Draftsman, Kozhikode, fresher"
-→ "MEP Electrical Engineer, Kochi, searching for 2 months"
-→ "AutoCAD Electrical, Malappuram, 1 year experience"
+→ "Software Developer, Kochi, 1 year experience"
+→ "Accountant, Malappuram, fresher"
 → "I applied to 4 jobs but no response"
-→ "I found an HR number in the job post"
-→ "No Electrical Draftsman openings on LinkedIn"
+→ "No openings on LinkedIn"
 `,
   cv: `
 CV BUILDER PILLAR — STRICT SCOPE:
@@ -590,8 +580,7 @@ HELP HINT EXAMPLES:
 → "Earn Rs 25,000, have Rs 5,000 saved, want to start investing for first time"
 → "Have credit card debt Rs 50,000, no savings, earn Rs 20,000 — need help"`,
 
-  
-hustle: `
+  hustle: `
 SIDE HUSTLE PILLAR — STRICT SCOPE:
 
 ONLY handles:
@@ -852,7 +841,7 @@ NEVER give task when these words appear without clarification first.
 MINIMUM CONTEXT PER PILLAR
 ━━━━━━━━━━━━━━
 career: specific worry + current role/field
-jobs: exact role + location + how long searching
+jobs: exact role + location + fresher/experience status
 cv: target role + have CV or from scratch + weak area
 wealth: monthly income + biggest worry + savings status
 hustle: specific skills + hours free daily + fast or long-term
@@ -880,19 +869,19 @@ When user says done / completed / applied / finished:
 4. Next task based ONLY on their reply — never generic
 
 ━━━━━━━━━━━━━━
-ANTI-REPEAT PLATFORM
+ANTI-REPEAT CHANNEL
 ━━━━━━━━━━━━━━
 Read the full conversation.
-Do not repeat the same job platform as the main task.
+Do not repeat the same job channel as the main task.
 
-Platform order:
-Naukri → LinkedIn Jobs → Indeed India → Foundit or Internshala.
+Channel order:
+Naukri → LinkedIn Jobs → Indeed India → Foundit/Internshala → NCS → Apprenticeship India → Kerala Employment Exchange.
 
 Named companies can only be mentioned as an optional extra:
 "Check this company's careers page for current openings."
 
 Never say a named company is hiring.
-Never say “apply to L&T” or “apply to KEF” unless a live vacancy is verified.
+Never say "apply to L&T" or "apply to KEF" unless a live vacancy is verified.
 
 ━━━━━━━━━━━━━━
 CV KEYWORD RULE
@@ -956,7 +945,11 @@ CRITICAL: Output ONLY JSON. Nothing before. Nothing after. No backticks. No mark
 
 const callGemini = async (systemPrompt, messages) => {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("No Gemini key");
+  if (!apiKey) {
+    const err = new Error("No Gemini key");
+    err.code = "PROVIDER_ERROR";
+    throw err;
+  }
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
     {
@@ -972,17 +965,45 @@ const callGemini = async (systemPrompt, messages) => {
       }),
     }
   );
-  if (res.status === 429) throw new Error("RATE_LIMITED");
-  if (!res.ok) throw new Error(`Gemini ${res.status}`);
+
+  console.log("[chat] gemini provider status:", res.status);
+
+  if (res.status === 429) {
+    const err = new Error("RATE_LIMITED");
+    err.code = "PROVIDER_RATE_LIMIT";
+    throw err;
+  }
+  if (res.status === 408 || res.status === 504) {
+    const err = new Error("TIMEOUT");
+    err.code = "PROVIDER_TIMEOUT";
+    throw err;
+  }
+  if (!res.ok) {
+    let bodyText = "";
+    try { bodyText = await res.text(); } catch {}
+    console.error("[chat] gemini provider error body:", bodyText);
+    const err = new Error(`Gemini ${res.status}`);
+    err.code = "PROVIDER_ERROR";
+    throw err;
+  }
+
   const data = await res.json();
   const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!reply) throw new Error("Empty Gemini");
+  if (!reply) {
+    const err = new Error("Empty Gemini response");
+    err.code = "PROVIDER_ERROR";
+    throw err;
+  }
   return reply;
 };
 
 const callGroq = async (systemPrompt, messages) => {
   const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) throw new Error("No Groq key");
+  if (!apiKey) {
+    const err = new Error("No Groq key");
+    err.code = "PROVIDER_ERROR";
+    throw err;
+  }
   const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
@@ -999,10 +1020,35 @@ const callGroq = async (systemPrompt, messages) => {
       temperature: 0.7,
     }),
   });
-  if (!res.ok) throw new Error(`Groq ${res.status}`);
+
+  console.log("[chat] groq provider status:", res.status);
+
+  if (res.status === 429) {
+    const err = new Error("RATE_LIMITED");
+    err.code = "PROVIDER_RATE_LIMIT";
+    throw err;
+  }
+  if (res.status === 408 || res.status === 504) {
+    const err = new Error("TIMEOUT");
+    err.code = "PROVIDER_TIMEOUT";
+    throw err;
+  }
+  if (!res.ok) {
+    let bodyText = "";
+    try { bodyText = await res.text(); } catch {}
+    console.error("[chat] groq provider error body:", bodyText);
+    const err = new Error(`Groq ${res.status}`);
+    err.code = "PROVIDER_ERROR";
+    throw err;
+  }
+
   const data = await res.json();
   const reply = data.choices?.[0]?.message?.content;
-  if (!reply) throw new Error("Empty Groq");
+  if (!reply) {
+    const err = new Error("Empty Groq response");
+    err.code = "PROVIDER_ERROR";
+    throw err;
+  }
   return reply;
 };
 
@@ -1012,42 +1058,168 @@ const parseJSON = (text) => {
     return JSON.parse(clean);
   } catch {
     const match = text.match(/\{[\s\S]*\}/);
-    if (match) { try { return JSON.parse(match[0]); } catch {} }
+    if (match) {
+      try { return JSON.parse(match[0]); } catch {}
+    }
     return null;
   }
+};
+
+const SAFE_DEFAULTS = {
+  summary: "",
+  insight: "",
+  task: "",
+  how_to_do: "",
+  what_to_do: "",
+  where_to_do: "",
+  success: "",
+  why_this_task: "",
+  task_link: "",
+  task_link_label: "",
+  motivation: "",
+  next_step: "",
+  help_hint: "",
+  needs_more_info: true,
+  follow_up_question: "",
+};
+
+// Basic URL validation — if the model produced a malformed task_link,
+// strip it rather than send the user to a broken page.
+const isValidUrl = (str) => {
+  if (!str || typeof str !== "string") return false;
+  try {
+    const u = new URL(str);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
+const sanitizeStructured = (structured) => {
+  if (!structured || typeof structured !== "object") return null;
+
+  const merged = { ...SAFE_DEFAULTS, ...structured };
+
+  if (merged.needs_more_info === true) {
+    merged.task = "";
+    merged.why_this_task = "";
+    merged.how_to_do = "";
+    merged.what_to_do = "";
+    merged.where_to_do = "";
+    merged.success = "";
+    merged.task_link = "";
+    merged.task_link_label = "";
+    merged.motivation = "";
+    merged.next_step = "";
+    merged.insight = "";
+  } else if (merged.task_link && !isValidUrl(merged.task_link)) {
+    // Task is ready but the link is malformed — drop the link, keep the task text.
+    merged.task_link = "";
+    merged.task_link_label = "";
+  }
+
+  return merged;
 };
 
 export async function POST(request) {
   try {
     const body = await request.json();
     const { messages, pillarId = "career", profile = {} } = body;
-    if (!messages?.length) return NextResponse.json({ error: "Messages required" }, { status: 400 });
+
+    console.log("[chat] pillar:", pillarId);
+    console.log("[chat] conversation length:", messages?.length);
+
+    if (!messages?.length) {
+      return NextResponse.json(
+        { error: true, code: "INVALID_REQUEST", message: "Messages required." },
+        { status: 400 }
+      );
+    }
+
     const rawLatest = messages.filter(m => m.role === "user").slice(-1)[0]?.content || "";
     const latestMsg = rawLatest.trim().replace(/[<>&"']/g, "");
-    if (!latestMsg) return NextResponse.json({ error: "Invalid message" }, { status: 400 });
+
+    console.log("[chat] incoming message:", latestMsg);
+
+    if (!latestMsg) {
+      return NextResponse.json(
+        { error: true, code: "INVALID_REQUEST", message: "Invalid message." },
+        { status: 400 }
+      );
+    }
+
     const language = detectLanguage(latestMsg);
     const systemPrompt = buildSystem(pillarId, profile, language);
-    let rawReply, usedFallback = false;
+
+    let rawReply;
+    let usedFallback = false;
+
     try {
       rawReply = await callGemini(systemPrompt, messages);
     } catch (geminiErr) {
-      console.log("Gemini → Groq:", geminiErr.message);
+      console.error("[chat] gemini failed, trying groq:", geminiErr.message, geminiErr.code);
       try {
         rawReply = await callGroq(systemPrompt, messages);
         usedFallback = true;
-      } catch {
-        return NextResponse.json({ error: "AI service busy. Please retry." }, { status: 503 });
+      } catch (groqErr) {
+        console.error("[chat] groq also failed:", groqErr.message, groqErr.code);
+        console.error("[chat] full error:", groqErr);
+        console.error("[chat] stack:", groqErr instanceof Error ? groqErr.stack : "No stack");
+
+        const code = groqErr.code || "PROVIDER_ERROR";
+        const messagesByCode = {
+          PROVIDER_RATE_LIMIT: "The AI service is temporarily busy. Please retry in a moment.",
+          PROVIDER_TIMEOUT: "The AI service took too long to respond. Please retry.",
+          PROVIDER_ERROR: "The AI service had a problem. Please retry in a moment.",
+        };
+
+        return NextResponse.json(
+          {
+            error: true,
+            code,
+            message: messagesByCode[code] || messagesByCode.PROVIDER_ERROR,
+          },
+          { status: code === "PROVIDER_RATE_LIMIT" ? 429 : 503 }
+        );
       }
     }
+
     const parsed = parseJSON(rawReply);
+
+    console.log("[chat] parsed AI response:", parsed);
+
+    if (!parsed) {
+      console.error("[chat] validation error: AI response was not valid JSON");
+      return NextResponse.json(
+        {
+          error: true,
+          code: "INVALID_AI_JSON",
+          message: "Could not understand the AI response. Please retry.",
+        },
+        { status: 502 }
+      );
+    }
+
+    const structured = sanitizeStructured(parsed);
+
     return NextResponse.json({
-      reply: parsed ? null : rawReply,
-      structured: parsed || null,
-      language, pillarId,
+      reply: null,
+      structured,
+      language,
+      pillarId,
       engine: usedFallback ? "groq" : "gemini",
     });
   } catch (error) {
-    return NextResponse.json({ error: error.message || "Server error." }, { status: 500 });
+    console.error("[chat] full error:", error);
+    console.error("[chat] stack:", error instanceof Error ? error.stack : "No stack");
+    return NextResponse.json(
+      {
+        error: true,
+        code: "SERVER_ERROR",
+        message: error.message || "Server error.",
+      },
+      { status: 500 }
+    );
   }
 }
 
