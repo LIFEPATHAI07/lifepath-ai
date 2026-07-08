@@ -729,17 +729,36 @@ export default function LifePathAI() {
     const userMsg = input.trim();
     setInput(""); setCvFile(null);
     const prev = messages[pillar.id] || [];
-    const currentMemory = getMemory();
-    const apiMessages = prev
-      .filter(m => m.content || m.structured)
-      .map(m => ({
-        role: m.role,
-        content: m.content || (m.structured
-          ? `[AI: summary="${m.structured.summary || ""}" task="${m.structured.task || ""}" question="${m.structured.follow_up_question || ""}"]`
-          : ""),
-      }))
-      .filter(m => m.content);
-    apiMessages.push({ role: "user", content: userMsg });
+const currentMemory = getMemory();
+
+const MAX_HISTORY_MESSAGES = 12;
+const MAX_MESSAGE_CHARS = 1200;
+
+const truncate = (text) => {
+  if (!text) return "";
+  return text.length > MAX_MESSAGE_CHARS
+    ? text.slice(0, MAX_MESSAGE_CHARS) + " ...[truncated]"
+    : text;
+};
+
+const fullApiMessages = prev
+  .filter(m => m.content || m.structured)
+  .map(m => ({
+    role: m.role,
+    content: truncate(m.content) || (
+      m.structured
+        ? `[AI: summary="${truncate(m.structured.summary) || ""}" task="${truncate(m.structured.task) || ""}" question="${truncate(m.structured.follow_up_question) || ""}"]`
+        : ""
+    ),
+  }))
+  .filter(m => m.content);
+
+const apiMessages = fullApiMessages.slice(-MAX_HISTORY_MESSAGES);
+
+apiMessages.push({
+  role: "user",
+  content: truncate(userMsg),
+});
     const newMsgs = [...prev, { role: "user", content: userMsg }];
     setMessages(m => ({ ...m, [pillar.id]: newMsgs }));
     setLoading(true);
