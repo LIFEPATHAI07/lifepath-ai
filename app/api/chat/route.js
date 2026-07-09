@@ -37,7 +37,7 @@ Last Task: ${profile.lastTask || "?"}`;
 };
 
 const MARKET_INTEL = `
-KERALA & INDIA MARKET 2024-25:
+KERALA & INDIA MARKET:
 
 JOB PLATFORMS:
 Naukri: https://www.naukri.com
@@ -399,52 +399,83 @@ CONTEXT MISSING OR WRONG PILLAR:
 CRITICAL: Output ONLY JSON. Nothing before or after. No backticks. No markdown.`;
 };
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const callGemini = async (systemPrompt, messages) => {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     const err = new Error("No Gemini key");
-    err.code = "PROVIDER_ERROR";
+    err.code = "INVALID_API_KEY";
     throw err;
   }
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: systemPrompt }] },
-        contents: messages.map(m => ({
-          role: m.role === "assistant" ? "model" : "user",
-          parts: [{ text: m.content }],
-        })),
-        generationConfig: { maxOutputTokens: 1200, temperature: 0.7 },
-      }),
+
+  let res;
+  try {
+    res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: systemPrompt }] },
+          contents: messages.map(m => ({
+            role: m.role === "assistant" ? "model" : "user",
+            parts: [{ text: m.content }],
+          })),
+          generationConfig: { maxOutputTokens: 1200, temperature: 0.7 },
+        }),
+      }
+    );
+  } catch (networkErr) {
+    console.error("[chat] provider failed", {
+      provider: "gemini",
+      status: null,
+      statusText: null,
+      body: null,
+      message: networkErr?.message,
+    });
+    const err = new Error("Gemini network error");
+    err.code = "PROVIDER_TIMEOUT";
+    throw err;
+  }
+
+  if (!res.ok) {
+    let errorBody = "";
+    try { errorBody = await res.text(); } catch {}
+
+    console.error("[chat] provider failed", {
+      provider: "gemini",
+      status: res.status,
+      statusText: res.statusText,
+      body: errorBody.slice(0, 500),
+      message: null,
+    });
+
+    if (res.status === 429) {
+      const err = new Error("RATE_LIMITED"); err.code = "RATE_LIMIT"; throw err;
     }
-  );
-
-  let bodyText = "";
-  if (!res.ok) {
-    try { bodyText = await res.text(); } catch {}
-  }
-  console.log("[chat] gemini status:", res.status, res.ok ? "" : `body: ${bodyText.slice(0, 500)}`);
-
-  if (res.status === 429) {
-    const err = new Error("RATE_LIMITED"); err.code = "RATE_LIMIT"; throw err;
-  }
-  if (res.status === 408 || res.status === 504) {
-    const err = new Error("TIMEOUT"); err.code = "TIMEOUT"; throw err;
-  }
-  if (res.status === 400 || res.status === 401 || res.status === 403) {
-    const err = new Error(`Gemini auth/request error ${res.status}`); err.code = "INVALID_API_KEY"; throw err;
-  }
-  if (!res.ok) {
+    if (res.status === 408 || res.status === 504) {
+      const err = new Error("TIMEOUT"); err.code = "PROVIDER_TIMEOUT"; throw err;
+    }
+    if (res.status === 400 || res.status === 401 || res.status === 403) {
+      const err = new Error(`Gemini auth/request error ${res.status}`); err.code = "INVALID_API_KEY"; throw err;
+    }
     const err = new Error(`Gemini ${res.status}`); err.code = "SERVER_ERROR"; throw err;
   }
 
   const data = await res.json();
   const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!reply) {
-    const err = new Error("Empty Gemini response"); err.code = "INVALID_PROVIDER_RESPONSE"; throw err;
+    console.error("[chat] provider failed", {
+      provider: "gemini",
+      status: res.status,
+      statusText: res.statusText,
+      body: JSON.stringify(data).slice(0, 500),
+      message: "Empty reply",
+    });
+    const err = new Error("Empty Gemini response");
+    err.code = "BAD_PROVIDER_RESPONSE";
+    throw err;
   }
   return reply;
 };
@@ -452,48 +483,79 @@ const callGemini = async (systemPrompt, messages) => {
 const callGroq = async (systemPrompt, messages) => {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
-    const err = new Error("No Groq key"); err.code = "PROVIDER_ERROR"; throw err;
+    const err = new Error("No Groq key");
+    err.code = "INVALID_API_KEY";
+    throw err;
   }
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: "llama-3.3-70b-versatile",
-      messages: [
-        { role: "system", content: systemPrompt },
-        ...messages.map(m => ({
-          role: m.role === "assistant" ? "assistant" : "user",
-          content: m.content,
-        })),
-      ],
-      max_tokens: 1200,
-      temperature: 0.7,
-    }),
-  });
 
-  let bodyText = "";
-  if (!res.ok) {
-    try { bodyText = await res.text(); } catch {}
+  let res;
+  try {
+    res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+        messages: [
+          { role: "system", content: systemPrompt },
+          ...messages.map(m => ({
+            role: m.role === "assistant" ? "assistant" : "user",
+            content: m.content,
+          })),
+        ],
+        max_tokens: 1200,
+        temperature: 0.7,
+      }),
+    });
+  } catch (networkErr) {
+    console.error("[chat] provider failed", {
+      provider: "groq",
+      status: null,
+      statusText: null,
+      body: null,
+      message: networkErr?.message,
+    });
+    const err = new Error("Groq network error");
+    err.code = "PROVIDER_TIMEOUT";
+    throw err;
   }
-  console.log("[chat] groq status:", res.status, res.ok ? "" : `body: ${bodyText.slice(0, 500)}`);
 
-  if (res.status === 429) {
-    const err = new Error("RATE_LIMITED"); err.code = "RATE_LIMIT"; throw err;
-  }
-  if (res.status === 408 || res.status === 504) {
-    const err = new Error("TIMEOUT"); err.code = "TIMEOUT"; throw err;
-  }
-  if (res.status === 400 || res.status === 401 || res.status === 403) {
-    const err = new Error(`Groq auth/request error ${res.status}`); err.code = "INVALID_API_KEY"; throw err;
-  }
   if (!res.ok) {
+    let errorBody = "";
+    try { errorBody = await res.text(); } catch {}
+
+    console.error("[chat] provider failed", {
+      provider: "groq",
+      status: res.status,
+      statusText: res.statusText,
+      body: errorBody.slice(0, 500),
+      message: null,
+    });
+
+    if (res.status === 429) {
+      const err = new Error("RATE_LIMITED"); err.code = "RATE_LIMIT"; throw err;
+    }
+    if (res.status === 408 || res.status === 504) {
+      const err = new Error("TIMEOUT"); err.code = "PROVIDER_TIMEOUT"; throw err;
+    }
+    if (res.status === 400 || res.status === 401 || res.status === 403) {
+      const err = new Error(`Groq auth/request error ${res.status}`); err.code = "INVALID_API_KEY"; throw err;
+    }
     const err = new Error(`Groq ${res.status}`); err.code = "SERVER_ERROR"; throw err;
   }
 
   const data = await res.json();
   const reply = data.choices?.[0]?.message?.content;
   if (!reply) {
-    const err = new Error("Empty Groq response"); err.code = "INVALID_PROVIDER_RESPONSE"; throw err;
+    console.error("[chat] provider failed", {
+      provider: "groq",
+      status: res.status,
+      statusText: res.statusText,
+      body: JSON.stringify(data).slice(0, 500),
+      message: "Empty reply",
+    });
+    const err = new Error("Empty Groq response");
+    err.code = "BAD_PROVIDER_RESPONSE";
+    throw err;
   }
   return reply;
 };
@@ -543,10 +605,32 @@ const sanitizeStructured = (structured) => {
   return merged;
 };
 
+// Tries Gemini, falls back to Groq. Returns { rawReply, usedFallback }.
+// Throws the last error if both fail.
+const getAiReply = async (systemPrompt, messages) => {
+  console.log("[chat] gemini attempt");
+  try {
+    const rawReply = await callGemini(systemPrompt, messages);
+    console.log("[chat] success", { provider: "gemini" });
+    return { rawReply, usedFallback: false };
+  } catch (geminiErr) {
+    console.log("[chat] groq fallback attempt");
+    const rawReply = await callGroq(systemPrompt, messages);
+    console.log("[chat] success", { provider: "groq" });
+    return { rawReply, usedFallback: true };
+  }
+};
+
 export async function POST(request) {
   try {
     const body = await request.json();
     const { messages, pillarId = "career", profile = {} } = body;
+
+    console.log("[chat] request start", {
+      pillarId,
+      messageCount: messages?.length,
+      totalChars: messages?.reduce((sum, m) => sum + (m.content?.length || 0), 0),
+    });
 
     if (!messages?.length) {
       return NextResponse.json(
@@ -567,43 +651,57 @@ export async function POST(request) {
 
     const language = detectLanguage(latestMsg);
     const systemPrompt = buildSystem(pillarId, profile, language);
-
-    const contentChars = messages.reduce((sum, m) => sum + (m.content?.length || 0), 0);
-    console.log("[chat] pillar:", pillarId);
     console.log("[chat] system prompt chars:", systemPrompt.length);
-    console.log("[chat] conversation message count:", messages.length);
-    console.log("[chat] conversation content chars:", contentChars);
-    console.log("[chat] total chars this request:", systemPrompt.length + contentChars);
 
     let rawReply;
     let usedFallback = false;
+    let lastErrorCode = "SERVER_ERROR";
 
+    // Attempt 1
     try {
-      rawReply = await callGemini(systemPrompt, messages);
-    } catch (geminiErr) {
-      console.error("[chat] gemini failed:", geminiErr.message, geminiErr.code);
-      try {
-        rawReply = await callGroq(systemPrompt, messages);
-        usedFallback = true;
-      } catch (groqErr) {
-        console.error("[chat] groq also failed:", groqErr.message, groqErr.code);
-        console.error("[chat] full error:", groqErr);
-        console.error("[chat] stack:", groqErr instanceof Error ? groqErr.stack : "No stack");
+      const result = await getAiReply(systemPrompt, messages);
+      rawReply = result.rawReply;
+      usedFallback = result.usedFallback;
+    } catch (firstErr) {
+      lastErrorCode = firstErr.code || "SERVER_ERROR";
 
-        const code = groqErr.code || "SERVER_ERROR";
-        const messagesByCode = {
-          RATE_LIMIT: "The AI service is temporarily busy. Please retry in a moment.",
-          TIMEOUT: "The AI service took too long to respond. Please retry.",
-          INVALID_API_KEY: "There is a configuration problem with the AI service.",
-          INVALID_PROVIDER_RESPONSE: "The AI service gave an unexpected response. Please retry.",
-          SERVER_ERROR: "The AI service had a problem. Please retry in a moment.",
-        };
-
-        return NextResponse.json(
-          { error: true, code, message: messagesByCode[code] || messagesByCode.SERVER_ERROR },
-          { status: code === "RATE_LIMIT" ? 429 : 503 }
-        );
+      // Automatic single retry, only for RATE_LIMIT or PROVIDER_TIMEOUT —
+      // this is what catches the "fails once, succeeds immediately on
+      // identical retry" pattern without the user having to do it manually.
+      if (lastErrorCode === "RATE_LIMIT" || lastErrorCode === "PROVIDER_TIMEOUT") {
+        console.log("[chat] transient error, retrying once after 2s:", lastErrorCode);
+        await sleep(2000);
+        try {
+          const retryResult = await getAiReply(systemPrompt, messages);
+          rawReply = retryResult.rawReply;
+          usedFallback = retryResult.usedFallback;
+        } catch (secondErr) {
+          lastErrorCode = secondErr.code || "SERVER_ERROR";
+          console.error("[chat] retry also failed", {
+            code: lastErrorCode,
+            message: secondErr?.message,
+          });
+        }
       }
+    }
+
+    if (!rawReply) {
+      const messagesByCode = {
+        RATE_LIMIT: "The AI service is temporarily busy. Please retry in a moment.",
+        PROVIDER_TIMEOUT: "The AI service took too long to respond. Please retry.",
+        INVALID_API_KEY: "There is a configuration problem with the AI service.",
+        BAD_PROVIDER_RESPONSE: "The AI service gave an unexpected response. Please retry.",
+        SERVER_ERROR: "The AI service had a problem. Please retry in a moment.",
+      };
+
+      return NextResponse.json(
+        {
+          error: true,
+          code: lastErrorCode,
+          message: messagesByCode[lastErrorCode] || messagesByCode.SERVER_ERROR,
+        },
+        { status: lastErrorCode === "RATE_LIMIT" ? 429 : 503 }
+      );
     }
 
     const parsed = parseJSON(rawReply);
@@ -611,7 +709,7 @@ export async function POST(request) {
     if (!parsed) {
       console.error("[chat] validation error: AI response was not valid JSON. Raw:", rawReply?.slice(0, 300));
       return NextResponse.json(
-        { error: true, code: "INVALID_AI_JSON", message: "Could not understand the AI response. Please retry." },
+        { error: true, code: "BAD_PROVIDER_RESPONSE", message: "Could not understand the AI response. Please retry." },
         { status: 502 }
       );
     }
