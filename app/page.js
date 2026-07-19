@@ -769,8 +769,12 @@ apiMessages.push({
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: apiMessages, pillarId: pillar.id, profile: { ...profile, ...currentMemory } })
-      });
+        body: JSON.stringify({
+  messages: apiMessages,
+  pillarId: pillar.id,
+  profile: { ...profile, ...currentMemory },
+  userId: getUserId()
+});
       const data = await res.json();
       if (data.error) throw new Error(data.message || "Connection error. Please retry.");
 
