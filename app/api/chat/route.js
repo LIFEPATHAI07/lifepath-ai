@@ -642,7 +642,7 @@ const getAiReply = async (systemPrompt, messages) => {
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { messages, pillarId = "career", profile = {} } = body;
+    const { messages, pillarId = "career", profile = {}, userId } = body;
 
     console.log("[chat] request start", {
       pillarId,
