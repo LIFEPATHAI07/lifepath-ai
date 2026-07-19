@@ -767,13 +767,14 @@ apiMessages.push({
     setStreak(ns.count);
     try {
       const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-  messages: apiMessages,
-  pillarId: pillar.id,
-  profile: { ...profile, ...currentMemory },
-  userId: getUserId()
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    messages: apiMessages,
+    pillarId: pillar.id,
+    profile: { ...profile, ...currentMemory },
+    userId: getUserId()
+  })
 });
       const data = await res.json();
       if (data.error) throw new Error(data.message || "Connection error. Please retry.");
