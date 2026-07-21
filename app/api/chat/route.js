@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-
+import {
+  ensureUserMemory,
+  buildMemoryContext,
+  recordAssistantResponse,
+} from "../../../lib/userMemory";
 const detectLanguage = (text) => {
   if (/[\u0D00-\u0D7F]/.test(text)) return "malayalam";
   if (/[\u0900-\u097F]/.test(text)) return "hindi";
