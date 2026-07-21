@@ -780,7 +780,14 @@ console.log("[chat] memory context chars:", memoryContext.length);
         };
       }
     }
-
+if (userId) {
+  recordAssistantResponse(userId, pillarId, structured).catch((err) => {
+    console.error(
+      "[chat] recordAssistantResponse failed (non-fatal):",
+      err?.message
+    );
+  });
+}
     return NextResponse.json({
       reply: null,
       structured,
