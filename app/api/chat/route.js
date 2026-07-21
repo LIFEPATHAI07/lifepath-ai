@@ -672,8 +672,27 @@ export async function POST(request) {
     }
 
     const language = detectLanguage(latestMsg);
-    const systemPrompt = buildSystem(pillarId, profile, language);
-    console.log("[chat] system prompt chars:", systemPrompt.length);
+
+let memoryContext = "";
+
+if (userId) {
+  try {
+    const memory = await ensureUserMemory(userId);
+    memoryContext = buildMemoryContext(memory, pillarId);
+  } catch (memErr) {
+    console.error("[chat] memory load failed:", memErr?.message);
+  }
+}
+
+const systemPrompt = buildSystem(
+  pillarId,
+  profile,
+  language,
+  memoryContext
+);
+
+console.log("[chat] system prompt chars:", systemPrompt.length);
+console.log("[chat] memory context chars:", memoryContext.length);
 
     let rawReply;
     let usedFallback = false;
