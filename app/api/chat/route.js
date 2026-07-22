@@ -349,13 +349,14 @@ HELP HINT EXAMPLES:
 → "Want to sell handmade items online — made 5 pieces, want to validate"`,
 };
 
-const buildSystem = (pillarId, profile, language) => {
+const buildSystem = (pillarId, profile, language, memoryContext = "") => {
   const tone = TONE[language] || TONE.english;
   const profileCtx = buildProfile(profile);
   const pillarAddon = PILLAR_ADDONS[pillarId] || PILLAR_ADDONS.career;
 
   return `${tone}
 ${profileCtx}
+${memoryContext}
 ${MARKET_INTEL}
 ${pillarAddon}
 
