@@ -3,6 +3,7 @@ import {
   ensureUserMemory,
   buildMemoryContext,
   recordAssistantResponse,
+  getActiveTask,
 } from "../../../lib/userMemory";
 const detectLanguage = (text) => {
   if (/[\u0D00-\u0D7F]/.test(text)) return "malayalam";
