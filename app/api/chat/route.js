@@ -677,14 +677,25 @@ console.log("[BACKEND USER ID]", userId);
 
 let memoryContext = "";
 
+console.log("[MEMORY STEP 1] userId:", userId);
+
 if (userId) {
   try {
+    console.log("[MEMORY STEP 2] before ensureUserMemory");
+
     const memory = await ensureUserMemory(userId);
+
+    console.log("[MEMORY STEP 3] ensureUserMemory finished");
+
     memoryContext = buildMemoryContext(memory, pillarId);
+
+    console.log("[MEMORY STEP 4] buildMemoryContext finished");
   } catch (memErr) {
-    console.error("[chat] memory load failed:", memErr?.message);
+    console.error("[MEMORY STEP ERROR]", memErr);
   }
 }
+
+console.log("[MEMORY STEP 5] memoryContext length:", memoryContext.length);
 
 const systemPrompt = buildSystem(
   pillarId,
