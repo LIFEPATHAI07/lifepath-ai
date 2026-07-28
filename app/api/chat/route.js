@@ -784,18 +784,19 @@ console.log("[chat] memory context chars:", memoryContext.length);
     }
 if (userId) {
   console.log("[MEMORY DEBUG]", {
-  userId,
-  pillarId,
-  needs_more_info: structured.needs_more_info,
-  type: typeof structured.needs_more_info,
-  task: structured.task,
-});
-  recordAssistantResponse(userId, pillarId, structured).catch((err) => {
-    console.error(
-      "[chat] recordAssistantResponse failed (non-fatal):",
-      err?.message
-    );
+    userId,
+    pillarId,
+    needs_more_info: structured.needs_more_info,
+    type: typeof structured.needs_more_info,
+    task: structured.task,
   });
+
+  try {
+    await recordAssistantResponse(userId, pillarId, structured);
+    console.log("[MEMORY] recordAssistantResponse finished");
+  } catch (err) {
+    console.error("[MEMORY ERROR]", err);
+  }
 }
     return NextResponse.json({
       reply: null,
