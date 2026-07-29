@@ -649,7 +649,10 @@ export async function POST(request) {
   try {
     const body = await request.json();
     const { messages, pillarId = "career", profile = {}, userId } = body;
-    console.log("🔥 TEST DEPLOY V2");
+    console.log("1");
+console.log("2");
+console.log("3");
+console.log("[BACKEND USER ID]", userId);
 console.log("[BACKEND USER ID]", userId);
     console.log("[chat] request start", {
       pillarId,
