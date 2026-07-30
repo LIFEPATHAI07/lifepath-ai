@@ -688,10 +688,12 @@ if (userId) {
     console.log("[MEMORY STEP 2] before ensureUserMemory");
 
     const memory = await ensureUserMemory(userId);
+    console.log("MEMORY OBJECT:", JSON.stringify(memory, null, 2));
 
     console.log("[MEMORY STEP 3] ensureUserMemory finished");
 
     memoryContext = buildMemoryContext(memory, pillarId);
+    console.log("MEMORY CONTEXT:", memoryContext);
 
     console.log("[MEMORY STEP 4] buildMemoryContext finished");
   } catch (memErr) {
@@ -808,6 +810,8 @@ if (userId) {
 
   try {
     await recordAssistantResponse(userId, pillarId, structured);
+    const afterSave = await getUserMemory(userId);
+console.log("AFTER SAVE:", JSON.stringify(afterSave, null, 2));
     console.log("[MEMORY] recordAssistantResponse finished");
   } catch (err) {
     console.error("[MEMORY ERROR]", err);
