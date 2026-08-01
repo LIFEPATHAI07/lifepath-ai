@@ -647,7 +647,15 @@ const getAiReply = async (systemPrompt, messages) => {
 
 export async function POST(request) {
   try {
-    const body = await request.json();
+    let body;
+
+try {
+  body = await request.json();
+  console.log("✅ BODY PARSED");
+} catch (err) {
+  console.error("❌ BODY PARSE FAILED", err);
+  throw err;
+}
     const { messages, pillarId = "career", profile = {}, userId } = body;
     console.log("1");
 console.log("2");
