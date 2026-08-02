@@ -4,6 +4,7 @@ import {
   buildMemoryContext,
   recordAssistantResponse,
   getActiveTask,
+  getUserMemory,
 } from "../../../lib/userMemory";
 const detectLanguage = (text) => {
   if (/[\u0D00-\u0D7F]/.test(text)) return "malayalam";
@@ -818,8 +819,8 @@ if (userId) {
 
   try {
     await recordAssistantResponse(userId, pillarId, structured);
-    const afterSave = await getUserMemory(userId);
-console.log("AFTER SAVE:", JSON.stringify(afterSave, null, 2));
+    await recordAssistantResponse(userId, pillarId, structured);
+console.log("[MEMORY] recordAssistantResponse finished");
     console.log("[MEMORY] recordAssistantResponse finished");
   } catch (err) {
     console.error("[MEMORY ERROR]", err);
