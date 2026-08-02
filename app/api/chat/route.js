@@ -678,6 +678,13 @@ console.log("[BACKEND USER ID]", userId);
 
     const rawLatest = messages.filter(m => m.role === "user").slice(-1)[0]?.content || "";
     const latestMsg = rawLatest.trim().replace(/[<>&"']/g, "");
+    // Check if user already has a pending task
+let activeTask = null;
+
+if (userId) {
+  activeTask = await getActiveTask(userId);
+  console.log("[ACTIVE TASK]", activeTask);
+}
 
     if (!latestMsg) {
       return NextResponse.json(
@@ -687,6 +694,49 @@ console.log("[BACKEND USER ID]", userId);
     }
 
     const language = detectLanguage(latestMsg);
+    // Don't generate a new task if the old one is still pending
+if (
+  activeTask &&
+  activeTask.status === "pending"
+) {
+  const msg = latestMsg.toLowerCase();
+
+  const wantsNewTask =
+    msg.includes("done") ||
+    msg.includes("completed") ||
+    msg.includes("finished") ||
+    msg.includes("applied") ||
+    msg.includes("not found") ||
+    msg.includes("no jobs") ||
+    msg.includes("next") ||
+    msg.includes("again");
+
+  if (!wantsNewTask) {
+    return NextResponse.json({
+      reply: null,
+      structured: {
+        summary: "You still have a pending task.",
+        insight: "",
+        task: activeTask.title,
+        how_to_do: "",
+        what_to_do: "",
+        where_to_do: "",
+        success: "",
+        why_this_task: "",
+        task_link: "",
+        task_link_label: "",
+        motivation: "Complete this task first, then we'll move to the next one.",
+        next_step: "Tell me what happened after you finish it.",
+        help_hint: "",
+        needs_more_info: false,
+        follow_up_question: "",
+      },
+      language,
+      pillarId,
+      engine: "memory",
+    });
+  }
+}
 
 let memoryContext = "";
 
