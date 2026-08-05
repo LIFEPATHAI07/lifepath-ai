@@ -6,6 +6,7 @@ import {
   getActiveTask,
   getUserMemory,
 } from "../../../lib/userMemory";
+import { detectTaskProgress } from "../../../lib/taskManager";
 const detectLanguage = (text) => {
   if (/[\u0D00-\u0D7F]/.test(text)) return "malayalam";
   if (/[\u0900-\u097F]/.test(text)) return "hindi";
@@ -701,7 +702,8 @@ if (
 ) {
   const msg = latestMsg.toLowerCase();
 
-  const wantsNewTask =
+  const progress = detectTaskProgress(latestMsg);
+
     msg.includes("done") ||
     msg.includes("completed") ||
     msg.includes("finished") ||
@@ -716,7 +718,7 @@ msg.includes("no jobs") ||
     msg.includes("next") ||
     msg.includes("again");
 
-  if (!wantsNewTask) {
+  if (progress === "continue") {
     return NextResponse.json({
       reply: null,
       structured: {
