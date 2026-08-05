@@ -701,24 +701,11 @@ if (
   activeTask.status === "pending"
 ) {
   const msg = latestMsg.toLowerCase();
+const msg = latestMsg.toLowerCase();
 
-  const progress = detectTaskProgress(latestMsg);
+const progress = detectTaskProgress(latestMsg);
 
-    msg.includes("done") ||
-    msg.includes("completed") ||
-    msg.includes("finished") ||
-    msg.includes("applied") ||
-    msg.includes("no opening") ||
-msg.includes("no openings") ||
-msg.includes("not found") ||
-msg.includes("couldn't find") ||
-msg.includes("nothing found") ||
-msg.includes("no jobs") ||
-    msg.includes("no jobs") ||
-    msg.includes("next") ||
-    msg.includes("again");
-
-  if (progress === "continue") {
+if (progress === "continue") {
     return NextResponse.json({
       reply: null,
       structured: {
