@@ -700,12 +700,9 @@ if (
   activeTask &&
   activeTask.status === "pending"
 ) {
-  const msg = latestMsg.toLowerCase();
-const msg = latestMsg.toLowerCase();
+  const progress = detectTaskProgress(latestMsg);
 
-const progress = detectTaskProgress(latestMsg);
-
-if (progress === "continue") {
+  if (progress === "continue") {
     return NextResponse.json({
       reply: null,
       structured: {
