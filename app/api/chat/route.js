@@ -683,7 +683,7 @@ console.log("[BACKEND USER ID]", userId);
 let activeTask = null;
 
 if (userId) {
-  activeTask = await getActiveTask(userId);
+  activeTask = await getActiveTask(userId, pillarId);
   console.log("[ACTIVE TASK]", activeTask);
 }
 
