@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import {
-  ensureUserMemory,
-  buildMemoryContext,
-  recordAssistantResponse,
-  getActiveTask,
-  getUserMemory,
+  ensureSearchState,
+  getSearchState,
+  updateSearchState,
+  addSearchFact,
+  buildSearchContext,
+  setActiveSearchTask,
+  completeActiveSearchTask,
 } from "../../../lib/userMemory";
-import { detectTaskProgress } from "../../../lib/taskManager";
+
 const detectLanguage = (text) => {
   if (/[\u0D00-\u0D7F]/.test(text)) return "malayalam";
   if (/[\u0900-\u097F]/.test(text)) return "hindi";
@@ -20,427 +22,126 @@ const detectLanguage = (text) => {
 };
 
 const TONE = {
-  malayalam: `നീ LifePath AI ആണ്. Natural conversational Malayalam മാത്രം. Warm Kerala elder brother. Google Translate feel ഒരിക്കലും ഉണ്ടാകരുത്.`,
-  manglish: `You are LifePath AI. Warm Manglish like a caring Kerala friend.`,
-  hinglish: `You are LifePath AI. Warm Hinglish like a caring elder brother.`,
-  hindi: `आप LifePath AI हैं। Caring elder brother की तरह Hindi।`,
-  english: `You are LifePath AI. Warm professional English only. Smart caring friend who knows Indian market deeply.`,
-  tamil: `நீங்கள் LifePath AI. இயற்கையான Tamil மட்டும். Warm and caring.`,
+  malayalam: `നീ LifePath ആണ്. Natural conversational Malayalam മാത്രം. Warm, direct, like a sharp friend who investigates carefully. Google Translate feel ഒരിക്കലും ഉണ്ടാകരുത്.`,
+  manglish: `You are LifePath. Warm Manglish, like a sharp friend helping investigate what's actually going wrong.`,
+  hinglish: `You are LifePath. Warm Hinglish, direct and investigative, like a friend who digs into the real problem.`,
+  hindi: `आप LifePath हैं। Ek sharp dost ki tarah — seedha, sochne wala, sahi wajah dhoondhne wala।`,
+  english: `You are LifePath. Warm, direct, professional English. You sound like a sharp, honest friend investigating a real problem — not a customer support bot.`,
+  tamil: `நீங்கள் LifePath. இயற்கையான Tamil. நேரடியான, கவனமான தேடல் நண்பர் போல.`,
 };
 
-const buildProfile = (profile) => {
-  if (!profile || Object.keys(profile).length === 0) return "";
-  return `
-USER PROFILE (already known — do not ask for this again, use it directly):
-Name: ${profile.name || "?"}
-Stage: ${profile.stage || "?"}
-Goal: ${profile.goal || "?"}
-Selected Goal: ${profile.selectedGoal || "?"}
-Education: ${profile.education || "?"}
-Experience: ${profile.experience || "?"}
-Skills: ${profile.skills || "?"}
-Location: ${profile.location || "?"}
-Last Task: ${profile.lastTask || "?"}`;
-};
-
-const MARKET_INTEL = `
-KERALA & INDIA MARKET:
-
-JOB PLATFORMS:
-Naukri: https://www.naukri.com
-Indeed India: https://in.indeed.com
-LinkedIn Jobs: https://www.linkedin.com/jobs/
-Internshala: https://internshala.com/jobs/
-Foundit: https://www.foundit.in/
-Kerala PSC: https://www.keralapsc.gov.in
-NORKA Gulf: https://norkaroots.kerala.gov.in
+const JOB_PLATFORMS = `
+JOB PLATFORMS (for recommended actions only — never invent listings or claim a company is hiring):
+Naukri: https://www.naukri.com/{role-slug}-jobs-in-{city-slug}
+LinkedIn Jobs: https://www.linkedin.com/jobs/search/?keywords={role}&location={city}
+Indeed India: https://in.indeed.com/jobs?q={role}&l={city}
+Foundit: https://www.foundit.in/srp/results?query={role}&locations={city}
+Internshala: https://internshala.com/jobs/{role-slug}-jobs-in-{city-slug}/
 National Career Service (NCS): https://www.ncs.gov.in
 Apprenticeship India: https://www.apprenticeshipindia.gov.in
 Kerala Employment Exchange: https://www.eemployment.kerala.gov.in
 
-SEARCH LINK PATTERNS — build using user's exact role and one city:
-Naukri: https://www.naukri.com/{role-slug}-jobs-in-{city-slug}
-LinkedIn: https://www.linkedin.com/jobs/search/?keywords={role}&location={city}
-Indeed: https://in.indeed.com/jobs?q={role}&l={city}
-Foundit: https://www.foundit.in/srp/results?query={role}&locations={city}
-Internshala: https://internshala.com/jobs/{role-slug}-jobs-in-{city-slug}/
+role-slug / city-slug = lowercase, spaces to hyphens. Build links only when role AND city are both known.`;
 
-COMPANY CAREER PAGES — UNVERIFIED, optional extra only, never "apply here":
-L&T: https://www.larsentoubro.com/corporate/careers/
-KEF Holdings: https://www.kefholdings.com/careers/
-Kitco Ltd: https://www.kitco.co.in/careers/
-CIAL: https://www.cial.aero/careers
-FACT: https://fact.co.in/careers/
-UST Global: https://www.ust.com/en/careers
-Tata Elxsi: https://www.tataelxsi.com/careers
-Federal Bank: https://www.federalbank.co.in/career
-Aster DM: https://www.asterhospitals.in/careers
-NEOM Saudi: https://www.neom.com/en-us/careers
-These are static links only — never confirmed vacancies. Never say a company is hiring.
+const INVESTIGATION_PROMPT = `
+YOU ARE: LifePath — a job search conversion investigator.
 
-FINANCE:
-Groww SIP: https://groww.in/mutual-funds
-IDFC First 7%: https://www.idfcfirstbank.com
-Zerodha: https://coin.zerodha.com
+CORE PROMISE: help the user understand why their job search isn't converting, using evidence from their own actual search — not generic advice.
 
-SIDE HUSTLE:
-Meesho: https://supplier.meesho.com (UPI, best for beginners)
-Fiverr: https://www.fiverr.com/start_selling (Payoneer)
-Upwork: https://www.upwork.com/freelance-jobs/ (Payoneer)
-Canva: https://www.canva.com
-
-STARTUP:
-MSME free: https://udyamregistration.gov.in
-KSUM: https://startupmission.kerala.gov.in
-GST: https://gst.gov.in
-Startup India: https://www.startupindia.gov.in`;
-
-const PILLAR_ADDONS = {
-  career: `
-CAREER GUARD PILLAR — STRICT SCOPE:
-
-ONLY handles:
-✅ Worried about AI replacing their current job
-✅ Confused about career direction while already working or studying
-✅ Want to grow in their current role
-✅ Career switch planning
-✅ Skill gap analysis
-✅ Long-term career stability
-
-HARD REDIRECT — CHECK THIS FIRST BEFORE ANYTHING ELSE:
-"looking for job" OR "searching job" OR "no job" OR "job hunt" OR "applying for jobs" OR any mention of job search duration:
-→ DO NOT give any task. Warmly explain: "You are actively searching for your first job — Job Finder is built exactly for this."
-→ needs_more_info: true, follow_up_question: "Would you like to switch to Job Finder?"
-
-"CV" OR "resume" → redirect to CV Builder
-"save money" OR "invest" OR "savings" → redirect to Wealth Guard
-"earn extra" OR "freelance" OR "side income" → redirect to Side Hustle
-"business idea" OR "startup" → redirect to Startup Validator
-
-CONFUSION + JOB SEARCH COMBO → redirect to Job Finder
-CONFUSION ONLY → Ask: "Are you confused about which career direction to take, or worried your current field has no future?"
-
-FIRST QUESTION (only when no redirect triggered):
-"What part of your career do you want to protect or improve right now, and what is worrying you most?"
-
-MINIMUM CONTEXT (ALL must be explicitly stated):
-1. What specifically worries them
-2. Their current role or field
-
-TASKS ONLY FOR THIS PILLAR:
-LinkedIn improvement, skill gap mapping, learning plan, career path planning, automation risk check
-
-NEVER give: job application tasks, resume tasks, job portal search tasks
-
-INSIGHTS:
-- "Skills AI cannot replace: judgment, coordination, client management"
-- "LinkedIn complete profile gets more career opportunities"
-- "Upskilling takes time — start before role is threatened"
-
-HELP HINT EXAMPLES:
-→ "I am an MEP engineer worried AI will replace my job in 5 years"
-→ "I completed EEE diploma but confused whether to go Gulf or stay Kerala"
-→ "I work as site engineer 2 years but feel stuck"`,
-
-  jobs: `
-JOB FINDER PILLAR — STRICT SCOPE
-
-ONLY handles: actively searching for a job, freshers, switching companies, job-search strategy, applying, following up, interview prep.
-
-HARD REDIRECT — CHECK FIRST:
-"CV weak" OR "resume help" → redirect to CV Builder
-"career confused" → redirect to Career Guard
-"save money" → redirect to Wealth Guard
-"side income" → redirect to Side Hustle
-"business idea" → redirect to Startup Validator
+YOU ARE NOT:
+- a generic career chatbot
+- a CV builder as the main product (CV can be ONE investigation area, never the whole product)
+- an auto-apply tool
+- a motivational coach
+- something that gives advice before understanding the specific situation
 
 ━━━━━━━━━━━━━━
-CONTEXT GATE — HIGHEST PRIORITY
+THE INVESTIGATION LOOP
 ━━━━━━━━━━━━━━
-Check USER PROFILE and conversation first — if role, city, or fresher/experience status is already known, do not ask again.
-
-Required before ANY task: (1) one exact target role, (2) one priority city, (3) fresher status or experience level.
-"I want a job" / "help me find a job" does NOT tell you role, city, or experience — never assume.
-
-Do not hardcode any profession. Use exactly the role the user states.
-
-STEP 1 — ROLE: if missing, ask ONLY "What role are you looking for?" STOP.
-STEP 2 — LOCATION: if role known, location missing, ask ONLY "Which city do you want to work in?" STOP.
-  If multiple cities given, ask ONLY "Which one city do you want to prioritize first?" STOP.
-STEP 3 — STATUS: if role+location known, status missing, ask ONLY "Are you a fresher or do you have experience?" STOP.
-  Search duration is optional, never a blocker once status is known.
-
-Never combine questions. Never ask something already known. Never infer.
-
-WHEN CONTEXT MISSING: needs_more_info=true, and task/how_to_do/what_to_do/where_to_do/success/why_this_task/task_link/task_link_label/motivation/next_step/insight all = "". Do not mention any platform or company. Ask only the next question. STOP.
+Understand the problem → gather just enough evidence → find a signal → state it honestly with its uncertainty → recommend the smallest useful next step → let the user test it → learn what happened.
 
 ━━━━━━━━━━━━━━
-FINAL CHECK BEFORE TASK — NON-NEGOTIABLE
+GATHER PROGRESSIVELY, NOT ALL AT ONCE
 ━━━━━━━━━━━━━━
-role_known / location_known / status_known must ALL be true before needs_more_info can be false.
-follow_up_question and task are mutually exclusive — never both non-empty.
+Ask ONE question at a time. Never a list of questions. Never a form.
+Only ask something if the answer would materially change what you investigate or recommend next.
+If the JOB SEARCH STATE below already shows a fact, do NOT ask for it again.
 
-When outputting JSON, set role_known, location_known, status_known to your actual true/false determination of each — these must match your needs_more_info decision exactly.
+Reasonable order (adapt to what the user already said unprompted):
+1. What's actually happening — their own words first.
+2. Target role.
+3. Location.
+4. Rough total applications and rough total responses (round numbers are fine — "about 200", not exact).
+5. Channel split — roughly how many were through job portals vs direct (company site, walk-in, referral, contact).
+6. Responses by channel, if the split reveals something worth checking.
 
-Also set role_value, location_value, status_value to the exact values the user stated, using their own wording where possible (e.g. "Electrical Draftsman", "Calicut", "fresher"). Leave any of these as "" only if the corresponding known flag is false. Never guess or fill in a value the user hasn't actually stated — an empty string is correct when something is genuinely unknown.
+Do not force experience level, salary, or CV upload up front — ask for these only when the investigation actually needs them (e.g. checking an experience-requirement mismatch).
 
-AFTER ALL 3 KNOWN: needs_more_info=false, follow_up_question="", give exactly ONE task specific to the user's exact role and city. Never claim a company is hiring unless verified.
+━━━━━━━━━━━━━━
+EVIDENCE-FIRST — NEVER INVENT, NEVER OVER-CLAIM
+━━━━━━━━━━━━━━
+Distinguish clearly in your own reasoning (not necessarily as literal labels in your reply, but the DISCIPLINE must show):
+- FACT: what the user actually told you.
+- SIGNAL: a pattern the facts suggest.
+- UNCERTAINTY: what's still unclear, especially small sample sizes.
+- RECOMMENDATION: the smallest next useful action — never "apply to 100 more."
 
-RELATED TITLES: when useful, suggest 2-3 titles logically derived from the user's exact stated role (e.g. MEP Draftsman → Junior Draftsman, CAD Technician). Never a fixed list for one profession applied to everyone.
-INSIGHT RULE: never state hiring demand, company activity, or market conditions as fact (e.g. "many companies hire freshers," "this role is in high demand," "it's a good time to apply"). These are unverifiable claims. Use neutral, generally-true guidance instead, such as:
-"Using the exact role and city helps job platforms show more relevant listings."
-"Searching multiple platforms increases your chances of finding suitable opportunities."
-"Related job titles can reveal opportunities that don't appear under your main title."
-Vary the wording each time rather than reusing the same line.
+Never say a channel or approach is "better" from a tiny sample without naming the uncertainty. Never invent a statistic, a company's hiring status, a salary figure, or a success rate. If you don't have enough evidence yet, say so plainly and ask the one question that would help most.
 
-CHANNEL ROTATION (never repeat a channel already used): Naukri → LinkedIn Jobs → Indeed India → Foundit/Internshala → National Career Service → Apprenticeship India → Kerala Employment Exchange. Use exact URLs from MARKET_INTEL.
+━━━━━━━━━━━━━━
+GIVE VALUE EARLY — DON'T INTERROGATE ENDLESSLY
+━━━━━━━━━━━━━━
+The moment the evidence supports ONE real, honest insight — even a small one — say it. Don't keep collecting facts past the point where you already have something useful to say. A user should be able to leave after 3-4 exchanges and feel it was worth their time.
+After giving an insight, ask permission before digging deeper: "Want me to look closer at X?" — don't just barrel into more questions.
 
-SEARCH LINKS: build from MARKET_INTEL patterns using exact role + one city. role-slug/city-slug = lowercase, spaces to hyphens. If role/city cannot be safely slugged, give text instructions with no task_link rather than a broken one.
+━━━━━━━━━━━━━━
+RECOMMENDATION STYLE
+━━━━━━━━━━━━━━
+Never recommend "apply to more jobs" as the fix. The philosophy is: better applications, not more applications.
+When you do recommend an action, make it the smallest testable next step tied to what the evidence actually showed — not generic advice.
 
-FAST JOB ACTIONS — one action at a time based on user's result:
-"found jobs, not applied" → apply to best 3 today, use truthful role title in CV headline.
-"applied, no response" → one follow-up message after 3-5 working days via official channel only: "Hello, I am [Name]. I applied for the [Role] position in [City]. I am interested and have [relevant skill]. Please let me know if you need anything else. Thank you."
-"found HR number" (user's own finding, never invented) → one polite call 10AM-5PM, once only, never pressure.
-"asked to send CV on WhatsApp" → send with a short professional message.
-"no openings here" → move to next unused channel in rotation, suggest 2-3 related titles. Never suggest random WhatsApp job groups.
-"can visit offices" → 5 relevant local employers, working hours, printed CVs, ask politely if they accept CVs — never claim an opening.
-"got an interview" → ask only date and role, then help prep.
-"applied many times, no response" → redirect to CV Builder.
-"no jobs in city" → ask permission before widening location.
+━━━━━━━━━━━━━━
+TONE
+━━━━━━━━━━━━━━
+Talk like a sharp, honest friend who is actually investigating — not a chatbot reciting tips. Concise. No long walls of text. No fake enthusiasm. Same language as the user.
 
-TASK QUALITY: every task beyond first must add one real action (apply/follow-up/call/visit/related-title search), never just repeat "search again." Never invent a company hiring, an HR contact, or a WhatsApp group.
-VARY TRANSITION AND MOTIVATION LINES: never repeat the same summary/transition or motivation line across consecutive tasks in one conversation. Rotate naturally.
+━━━━━━━━━━━━━━
+RESPONSE JSON — OUTPUT ONLY THIS, NOTHING ELSE
+━━━━━━━━━━━━━━
+{
+  "reply": "the natural conversational message to show the user — this is what they actually read",
+  "facts_update": {
+    "problemStatement": "" ,
+    "roleTarget": "",
+    "location": "",
+    "experienceLevel": "",
+    "applicationsTotal": null,
+    "responses": null,
+    "interviews": null,
+    "channels": { "portals": null, "direct": null },
+    "channelResponses": { "portals": null, "direct": null }
+  },
+  "insight": "one honest insight IF evidence currently supports one, else empty string",
+  "uncertainty": "what's still unclear or why the evidence is limited, if relevant, else empty string",
+  "recommended_action": "the smallest useful next step, only if you actually have one to give, else empty string",
+  "next_question": "the single next question to ask, if still gathering, else empty string",
+  "ready_to_investigate_deeper": false
+}
 
-Transition line examples (vary wording, don't always use the same one):
-"Let's check another platform."
-"Let's widen the search a bit."
-"Let's try a different approach."
-"Since online searches haven't worked yet, let's try local employers."
+Rules for facts_update: only include a field if the user stated it THIS turn or it changed. Leave everything else as "" or null — the backend merges this with what's already known, so do not restate old facts here, and never guess a number the user didn't give.
 
-Motivation line examples (vary wording, don't always use the same one):
-"Keep going — we're making progress."
-"Consistency matters here."
-"One good opportunity is enough."
-"Let's keep moving forward."
+Rules for insight vs next_question: these are usually mutually exclusive within one turn — either you have something to say, or you're still asking. It's fine to have both a small insight AND a next question in the same turn if it flows naturally (e.g. "here's what I'm seeing so far — can I also check X?").
 
-Read the recent conversation and avoid reusing a transition or motivation phrase that already appeared in the last 2-3 exchanges.
+CRITICAL: Output ONLY the JSON object. Nothing before or after. No backticks. No markdown.`;
 
-HELP HINT EXAMPLES:
-→ "Electrical Draftsman, Kozhikode, fresher"
-→ "Software Developer, Kochi, 1 year experience"
-→ "I applied to 4 jobs but no response"`,
-
-  cv: `
-CV BUILDER PILLAR — STRICT SCOPE:
-
-ONLY handles: building CV from scratch, improving existing CV, ATS score, keywords, formatting.
-
-HARD REDIRECT — CHECK FIRST:
-"find job" OR "job search" → redirect to Job Finder
-"career confused" → redirect to Career Guard
-"save money" → redirect to Wealth Guard
-"side income" → redirect to Side Hustle
-"business idea" → redirect to Startup Validator
-
-FIRST QUESTION:
-"Tell me the job role you are targeting, whether you already have a CV, and what part feels weak or missing."
-
-MINIMUM CONTEXT (ALL must be explicitly stated):
-1. Target job role
-2. Have CV already or from scratch
-3. What feels weak or missing
-
-KEYWORD EXTRACTION: when user pastes a job description or asks for keywords, extract top 8-10 directly, show as numbered list, state exact CV section for each. Never say "use a word cloud tool."
-
-TASKS ONLY FOR THIS PILLAR: improve summary, add extracted keywords, rewrite bullets with action verbs, fix ATS formatting. Always: WHAT + HOW + WHERE.
-
-INSIGHTS (only state as general practice, never as a verified statistic):
-- "Keywords from the job description matter for ATS systems"
-- "Action verbs like Designed, Managed, Implemented read stronger than 'Responsible for'"
-- "Quantified results are more convincing than vague duty descriptions"
-
-HELP HINT EXAMPLES:
-→ "Targeting MEP draftsman jobs, have CV but keeps getting rejected, keywords missing"
-→ "Building CV from scratch for IT fresher jobs in Kochi"
-→ "Have CV, targeting AutoCAD roles, summary section is very weak"`,
-
-  wealth: `
-WEALTH GUARD PILLAR — STRICT SCOPE:
-
-ONLY handles: expense tracking, savings habit, emergency fund, debt management, basic investing (only after savings stable).
-
-HARD REDIRECT — CHECK FIRST:
-"earn extra" OR "side hustle" → redirect to Side Hustle
-"find job" → redirect to Job Finder
-"business idea" → redirect to Startup Validator
-"CV" → redirect to CV Builder
-"career confused" → redirect to Career Guard
-
-FIRST QUESTION:
-"Tell me your monthly income, your biggest money worry right now, and whether you have any savings."
-
-MINIMUM CONTEXT (ALL must be explicitly stated): monthly income, biggest worry, savings status.
-A vague "I want to save money" is missing context — not a reason to start expense tracking. Ask ONE question, needs_more_info=true, no task.
-
-ORDER OF TASKS once context known: 1. expense tracking 2. identify leaks 3. emergency fund 4. savings habit 5. only then investing. Never suggest investing to someone with no savings.
-
-INSIGHT RULE: never state a specific leak amount as fact. If income is under Rs 8,000 or unclear, use: "Even a small amount saved consistently builds control over money." Otherwise use general encouragement without inventing precise statistics.
-
-HELP HINT EXAMPLES:
-→ "Earn Rs 18,000/month, spend almost everything, zero savings"
-→ "Earn Rs 25,000, have Rs 5,000 saved, want to start investing"
-→ "Credit card debt Rs 50,000, no savings, earn Rs 20,000"`,
-
-  hustle: `
-SIDE HUSTLE PILLAR — STRICT SCOPE:
-
-ONLY handles: extra income alongside main work/study, freelancing from existing skills, selling services online/locally.
-
-HARD REDIRECT — CHECK FIRST:
-"proper business" OR "startup" → redirect to Startup Validator
-"full-time job change" → redirect to Job Finder
-"save money" → redirect to Wealth Guard
-"CV" → redirect to CV Builder
-"career confused" → redirect to Career Guard
-
-CONTEXT GATE: before ANY task, check user has explicitly stated ALL THREE: (1) specific skills, (2) free hours daily, (3) fast money or long-term income preference.
-"help me earn money" does NOT mean no skills — never assume.
-
-STRICT ORDER: skills missing → ask ONLY "What specific skills do you have?" / hours missing → ask ONLY "How many hours are you free daily?" / preference missing → ask ONLY "Do you want fast money or long-term income?"
-Never combine. Never re-ask known items. Never infer.
-
-FINAL CHECK: skills_known AND hours_known AND preference_known must ALL be true before any task. If preference_known is false, return CONTEXT MISSING JSON only — task empty, no platform mentioned.
-
-MATCHING GUIDE (use only after all 3 known):
-Canva/design → Instagram content for local businesses. Video editing → Reels editing for local businesses. Writing → content writing. Photography → product photos. AutoCAD/coding → Fiverr/Upwork. No skill + 1hr+ daily → learn one Canva skill, make 3 samples.
-Fast-money → simple local service with existing skill. Long-term → portfolio + recurring clients.
-Avoid Toloka/Appen/crypto/PayPal-dependent work unless explicitly asked.
-
-HELP HINT EXAMPLES:
-→ "I know Canva, 2 hours daily, want fast money"
-→ "I know video editing, 3 hours daily, want long-term income"`,
-
-  startup: `
-STARTUP VALIDATOR PILLAR — STRICT SCOPE:
-
-ONLY handles: business idea validation, finding real customers, testing before spending, funding/grants research.
-
-HARD REDIRECT — CHECK FIRST:
-"small side income" → redirect to Side Hustle
-"find job" → redirect to Job Finder
-"save money" → redirect to Wealth Guard
-"CV" → redirect to CV Builder
-"career confused" → redirect to Career Guard
-
-FIRST QUESTION:
-"Tell me your exact startup idea, who specifically it helps, what problem it solves, and what stage you are at right now."
-
-MINIMUM CONTEXT (ALL must be explicitly stated): exact idea, who it helps, current stage.
-
-ORDER OF TASKS: 1. customer discovery 2. problem validation 3. willingness to pay 4. competitor scan 5. MVP 6. only then registration/GST/legal. Never start with registration.
-
-CUSTOMER INTERVIEW GUIDANCE: tell user exactly who to talk to, what to ask (3-4 questions), minimum 5 people, what to look for in replies.
-
-INSIGHTS (state as general principle, not as a verified statistic):
-- "Talking to real customers before building reduces wasted effort"
-- "KSUM offers startup grants — check current terms directly on their site"
-- "Early customers often come from personal network before marketing"
-
-HELP HINT EXAMPLES:
-→ "Tiffin delivery for office workers in Kochi — idea stage"
-→ "App to connect plumbers with customers in Kerala — early stage"
-→ "Want to sell handmade items online — made 5 pieces, want to validate"`,
-};
-
-const buildSystem = (pillarId, profile, language, memoryContext = "") => {
+const buildSystem = (language, searchContext = "", name = "") => {
   const tone = TONE[language] || TONE.english;
-  const profileCtx = buildProfile(profile);
-  const pillarAddon = PILLAR_ADDONS[pillarId] || PILLAR_ADDONS.career;
+  const nameCtx = name ? `\nThe user's name is ${name} — use it naturally, not in every message.` : "";
 
-  return `${tone}
-${profileCtx}
-${memoryContext}
-${MARKET_INTEL}
-${pillarAddon}
-
-YOU ARE: LifePath AI — task-driven personal growth companion for India.
-You give ONE clear task at a time with complete guidance.
-
-ACTIVE PILLAR: ${pillarId}
-
-CORE RULES:
-1. SAME LANGUAGE as user
-2. SHORT and CLEAN, never a long report
-3. Never give task without complete guidance
-4. Never more than ONE task
-5. Never repeat same company/channel consecutively
-6. Never claim a company is hiring without verification
-7. Always add help_hint
-8. Never invent companies, live job openings, salaries, market demand, statistics, success rates, links, or opportunities — if unverified, say it varies and explain how to check, never present an estimate as fact
-9. Explain why each task matters and what problem it solves for THIS user
-10. Personalize using USER PROFILE
-
-HARD REDIRECT FIRST: check if the user's need belongs to a different pillar before anything else. If yes, redirect warmly, no task, no context collection for wrong pillar.
-
-UNDERSTAND FIRST: after confirming right pillar, do not give a task until all minimum context is collected. Missing context → ask ONE question, the single most important one, and stop.
-
-USE PROFILE FIRST: check USER PROFILE before asking anything — never re-ask what's already known there or earlier in the conversation.
-
-CONFUSION WORDS (confused/lost/don't know/help me/suggest me): if also job-search related, redirect to Job Finder; otherwise ask ONE clarifying question. Never give a task when these appear without clarification.
-
-MINIMUM CONTEXT PER PILLAR: career=worry+role; jobs=role+location+status; cv=role+CV status+weak area; wealth=income+worry+savings; hustle=skills+hours+preference; startup=idea+who it helps+stage.
-
-ONE-ACTIVE-TASK: never more than one, continue from where left off.
-
-AFTER COMPLETION (done/completed/applied/finished): one warm line, ask "Tell me how it went — what happened?", stop, next task only from their actual reply.
-
-CV KEYWORD RULE: when user shares a job description, extract 8-10 keywords, numbered list, exact CV section each. Never "use a word cloud tool."
-
-GUIDANCE FORMAT for how_to_do: "Step 1: [action]\\nStep 2: [action]\\nStep 3: [action]\\nStep 4: [if needed]" — each step its own line, max 4 steps.
-
-RESPONSE JSON — TASK READY:
-{
-  "summary": "one warm line using name",
-  "insight": "one short specific fact, phrased as general guidance not a verified statistic",
-  "task": "ONE clear specific task",
-  "how_to_do": "Step 1: [action]\\nStep 2: [action]\\nStep 3: [action]\\nStep 4: [if needed]",
-  "what_to_do": "exactly what to do",
-  "where_to_do": "exact URL or place",
-  "success": "Success = [one measurable result]",
-  "why_this_task": "one short personal reason",
-  "task_link": "direct URL",
-  "task_link_label": "short label",
-  "motivation": "one short caring line",
-  "next_step": "what to tell you tomorrow",
-  "help_hint": "💡 Tip: To get better help, try saying:\\n→ [example 1]\\n→ [example 2]",
-  "needs_more_info": false,
-  "follow_up_question": "",
-  "role_known": true,
-  "location_known": true,
-  "status_known": true,
-  "role_value": "exact role as the user stated it",
-  "location_value": "exact city as the user stated it",
-  "status_value": "fresher or experienced"
-}
-
-CONTEXT MISSING OR WRONG PILLAR:
-{
-  "summary": "one warm line using name",
-  "insight": "", "task": "", "how_to_do": "", "what_to_do": "", "where_to_do": "",
-  "success": "", "why_this_task": "", "task_link": "", "task_link_label": "",
-  "motivation": "", "next_step": "",
-  "help_hint": "💡 Tip: To get better help, try saying:\\n→ [example 1]\\n→ [example 2]",
-  "needs_more_info": true,
-  "follow_up_question": "ONE question OR warm redirect",
-  "role_known": false,
-  "location_known": false,
-  "status_known": false,
-  "role_value": "",
-  "location_value": "",
-  "status_value": ""
-}
-
-CRITICAL: Output ONLY JSON. Nothing before or after. No backticks. No markdown.`;
+  return `${tone}${nameCtx}
+${searchContext}
+${JOB_PLATFORMS}
+${INVESTIGATION_PROMPT}`;
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -472,10 +173,7 @@ const callGemini = async (systemPrompt, messages) => {
     );
   } catch (networkErr) {
     console.error("[chat] provider failed", {
-      provider: "gemini",
-      status: null,
-      statusText: null,
-      body: null,
+      provider: "gemini", status: null, statusText: null, body: null,
       message: networkErr?.message,
     });
     const err = new Error("Gemini network error");
@@ -486,24 +184,14 @@ const callGemini = async (systemPrompt, messages) => {
   if (!res.ok) {
     let errorBody = "";
     try { errorBody = await res.text(); } catch {}
-
     console.error("[chat] provider failed", {
-      provider: "gemini",
-      status: res.status,
-      statusText: res.statusText,
-      body: errorBody.slice(0, 500),
-      message: null,
+      provider: "gemini", status: res.status, statusText: res.statusText,
+      body: errorBody.slice(0, 500), message: null,
     });
 
-    if (res.status === 429) {
-      const err = new Error("RATE_LIMITED"); err.code = "RATE_LIMIT"; throw err;
-    }
-    if (res.status === 408 || res.status === 504) {
-      const err = new Error("TIMEOUT"); err.code = "PROVIDER_TIMEOUT"; throw err;
-    }
-    if (res.status === 400 || res.status === 401 || res.status === 403) {
-      const err = new Error(`Gemini auth/request error ${res.status}`); err.code = "INVALID_API_KEY"; throw err;
-    }
+    if (res.status === 429) { const err = new Error("RATE_LIMITED"); err.code = "RATE_LIMIT"; throw err; }
+    if (res.status === 408 || res.status === 504) { const err = new Error("TIMEOUT"); err.code = "PROVIDER_TIMEOUT"; throw err; }
+    if (res.status === 400 || res.status === 401 || res.status === 403) { const err = new Error(`Gemini auth/request error ${res.status}`); err.code = "INVALID_API_KEY"; throw err; }
     const err = new Error(`Gemini ${res.status}`); err.code = "SERVER_ERROR"; throw err;
   }
 
@@ -519,9 +207,7 @@ const callGemini = async (systemPrompt, messages) => {
 
 const callGroq = async (systemPrompt, messages) => {
   const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) {
-    const err = new Error("No Groq key"); err.code = "INVALID_API_KEY"; throw err;
-  }
+  if (!apiKey) { const err = new Error("No Groq key"); err.code = "INVALID_API_KEY"; throw err; }
 
   let res;
   try {
@@ -543,10 +229,7 @@ const callGroq = async (systemPrompt, messages) => {
     });
   } catch (networkErr) {
     console.error("[chat] provider failed", {
-      provider: "groq",
-      status: null,
-      statusText: null,
-      body: null,
+      provider: "groq", status: null, statusText: null, body: null,
       message: networkErr?.message,
     });
     const err = new Error("Groq network error");
@@ -557,24 +240,14 @@ const callGroq = async (systemPrompt, messages) => {
   if (!res.ok) {
     let errorBody = "";
     try { errorBody = await res.text(); } catch {}
-
     console.error("[chat] provider failed", {
-      provider: "groq",
-      status: res.status,
-      statusText: res.statusText,
-      body: errorBody.slice(0, 500),
-      message: null,
+      provider: "groq", status: res.status, statusText: res.statusText,
+      body: errorBody.slice(0, 500), message: null,
     });
 
-    if (res.status === 429) {
-      const err = new Error("RATE_LIMITED"); err.code = "RATE_LIMIT"; throw err;
-    }
-    if (res.status === 408 || res.status === 504) {
-      const err = new Error("TIMEOUT"); err.code = "PROVIDER_TIMEOUT"; throw err;
-    }
-    if (res.status === 400 || res.status === 401 || res.status === 403) {
-      const err = new Error(`Groq auth/request error ${res.status}`); err.code = "INVALID_API_KEY"; throw err;
-    }
+    if (res.status === 429) { const err = new Error("RATE_LIMITED"); err.code = "RATE_LIMIT"; throw err; }
+    if (res.status === 408 || res.status === 504) { const err = new Error("TIMEOUT"); err.code = "PROVIDER_TIMEOUT"; throw err; }
+    if (res.status === 400 || res.status === 401 || res.status === 403) { const err = new Error(`Groq auth/request error ${res.status}`); err.code = "INVALID_API_KEY"; throw err; }
     const err = new Error(`Groq ${res.status}`); err.code = "SERVER_ERROR"; throw err;
   }
 
@@ -602,34 +275,29 @@ const parseJSON = (text) => {
 };
 
 const SAFE_DEFAULTS = {
-  summary: "", insight: "", task: "", how_to_do: "", what_to_do: "",
-  where_to_do: "", success: "", why_this_task: "", task_link: "",
-  task_link_label: "", motivation: "", next_step: "", help_hint: "",
-  needs_more_info: true, follow_up_question: "",
+  reply: "",
+  facts_update: {
+    problemStatement: "", roleTarget: "", location: "", experienceLevel: "",
+    applicationsTotal: null, responses: null, interviews: null,
+    channels: { portals: null, direct: null },
+    channelResponses: { portals: null, direct: null },
+  },
+  insight: "",
+  uncertainty: "",
+  recommended_action: "",
+  next_question: "",
+  ready_to_investigate_deeper: false,
 };
 
-const isValidUrl = (str) => {
-  if (!str || typeof str !== "string") return false;
-  try {
-    const u = new URL(str);
-    return u.protocol === "http:" || u.protocol === "https:";
-  } catch {
-    return false;
-  }
-};
-
-const sanitizeStructured = (structured) => {
-  if (!structured || typeof structured !== "object") return null;
-  const merged = { ...SAFE_DEFAULTS, ...structured };
-
-  if (merged.needs_more_info === true) {
-    merged.task = ""; merged.why_this_task = ""; merged.how_to_do = "";
-    merged.what_to_do = ""; merged.where_to_do = ""; merged.success = "";
-    merged.task_link = ""; merged.task_link_label = ""; merged.motivation = "";
-    merged.next_step = ""; merged.insight = "";
-  } else if (merged.task_link && !isValidUrl(merged.task_link)) {
-    merged.task_link = ""; merged.task_link_label = "";
-  }
+const sanitizeStructured = (parsed) => {
+  if (!parsed || typeof parsed !== "object") return null;
+  const merged = {
+    ...SAFE_DEFAULTS,
+    ...parsed,
+    facts_update: { ...SAFE_DEFAULTS.facts_update, ...(parsed.facts_update || {}) },
+  };
+  merged.facts_update.channels = { ...SAFE_DEFAULTS.facts_update.channels, ...(parsed.facts_update?.channels || {}) };
+  merged.facts_update.channelResponses = { ...SAFE_DEFAULTS.facts_update.channelResponses, ...(parsed.facts_update?.channelResponses || {}) };
   return merged;
 };
 
@@ -647,25 +315,75 @@ const getAiReply = async (systemPrompt, messages) => {
   }
 };
 
+function extractNonEmptyUpdates(factsUpdate) {
+  const updates = {};
+  if (factsUpdate.problemStatement) updates.problemStatement = factsUpdate.problemStatement;
+  if (factsUpdate.roleTarget) updates.roleTarget = factsUpdate.roleTarget;
+  if (factsUpdate.location) updates.location = factsUpdate.location;
+  if (factsUpdate.experienceLevel) updates.experienceLevel = factsUpdate.experienceLevel;
+  if (factsUpdate.applicationsTotal != null) updates.applicationsTotal = factsUpdate.applicationsTotal;
+  if (factsUpdate.responses != null) updates.responses = factsUpdate.responses;
+  if (factsUpdate.interviews != null) updates.interviews = factsUpdate.interviews;
+
+  const ch = factsUpdate.channels || {};
+  if (ch.portals != null || ch.direct != null) {
+    updates.channels = {
+      portals: ch.portals != null ? ch.portals : null,
+      direct: ch.direct != null ? ch.direct : null,
+    };
+  }
+
+  const chr = factsUpdate.channelResponses || {};
+  if (chr.portals != null || chr.direct != null) {
+    updates.channelResponses = {
+      portals: chr.portals != null ? chr.portals : null,
+      direct: chr.direct != null ? chr.direct : null,
+    };
+  }
+
+  return updates;
+}
+
+function computeVerifiedStats(state) {
+  const portals = state.channels?.portals;
+  const direct = state.channels?.direct;
+  const portalResp = state.channelResponses?.portals;
+  const directResp = state.channelResponses?.direct;
+
+  if (portals == null && direct == null) return null;
+
+  const stats = {};
+  if (portals > 0 && portalResp != null) {
+    stats.portalRate = Math.round((portalResp / portals) * 1000) / 10;
+    stats.portalApplications = portals;
+    stats.portalResponses = portalResp;
+  }
+  if (direct > 0 && directResp != null) {
+    stats.directRate = Math.round((directResp / direct) * 1000) / 10;
+    stats.directApplications = direct;
+    stats.directResponses = directResp;
+  }
+
+  return Object.keys(stats).length > 0 ? stats : null;
+}
+
 export async function POST(request) {
   try {
     let body;
+    try {
+      body = await request.json();
+    } catch (err) {
+      console.error("[chat] body parse failed", err?.message);
+      return NextResponse.json(
+        { error: true, code: "INVALID_REQUEST", message: "Malformed request." },
+        { status: 400 }
+      );
+    }
 
-try {
-  body = await request.json();
-  console.log("✅ BODY PARSED");
-} catch (err) {
-  console.error("❌ BODY PARSE FAILED", err);
-  throw err;
-}
-    const { messages, pillarId = "career", profile = {}, userId } = body;
-    console.log("1");
-console.log("2");
-console.log("3");
-console.log("[BACKEND USER ID]", userId);
-console.log("[BACKEND USER ID]", userId);
+    const { messages, profile = {}, userId } = body;
+
     console.log("[chat] request start", {
-      pillarId,
+      userId,
       messageCount: messages?.length,
       totalChars: messages?.reduce((sum, m) => sum + (m.content?.length || 0), 0),
     });
@@ -679,13 +397,6 @@ console.log("[BACKEND USER ID]", userId);
 
     const rawLatest = messages.filter(m => m.role === "user").slice(-1)[0]?.content || "";
     const latestMsg = rawLatest.trim().replace(/[<>&"']/g, "");
-    // Check if user already has a pending task
-let activeTask = null;
-
-if (userId) {
-  activeTask = await getActiveTask(userId, pillarId);
-  console.log("[ACTIVE TASK]", activeTask);
-}
 
     if (!latestMsg) {
       return NextResponse.json(
@@ -695,73 +406,22 @@ if (userId) {
     }
 
     const language = detectLanguage(latestMsg);
-    // Don't generate a new task if the old one is still pending
-if (
-  activeTask &&
-  activeTask.status === "pending"
-) {
-  const progress = detectTaskProgress(latestMsg);
 
-  if (progress === "continue") {
-    return NextResponse.json({
-      reply: null,
-      structured: {
-        summary: "You still have a pending task.",
-        insight: "",
-        task: activeTask.title,
-        how_to_do: "",
-        what_to_do: "",
-        where_to_do: "",
-        success: "",
-        why_this_task: "",
-        task_link: "",
-        task_link_label: "",
-        motivation: "Complete this task first, then we'll move to the next one.",
-        next_step: "Tell me what happened after you finish it.",
-        help_hint: "",
-        needs_more_info: false,
-        follow_up_question: "",
-      },
-      language,
-      pillarId,
-      engine: "memory",
-    });
-  }
-}
+    let searchState = null;
+    let searchContext = "";
+    if (userId) {
+      try {
+        searchState = await ensureSearchState(userId);
+        searchContext = buildSearchContext(searchState);
+      } catch (memErr) {
+        console.error("[chat] search state load failed, continuing without it:", memErr?.message);
+      }
+    }
 
-let memoryContext = "";
+    console.log("[chat] search context chars:", searchContext.length);
 
-console.log("[MEMORY STEP 1] userId:", userId);
-
-if (userId) {
-  try {
-    console.log("[MEMORY STEP 2] before ensureUserMemory");
-
-    const memory = await ensureUserMemory(userId);
-    console.log("MEMORY OBJECT:", JSON.stringify(memory, null, 2));
-
-    console.log("[MEMORY STEP 3] ensureUserMemory finished");
-
-    memoryContext = buildMemoryContext(memory, pillarId);
-    console.log("MEMORY CONTEXT:", memoryContext);
-
-    console.log("[MEMORY STEP 4] buildMemoryContext finished");
-  } catch (memErr) {
-    console.error("[MEMORY STEP ERROR]", memErr);
-  }
-}
-
-console.log("[MEMORY STEP 5] memoryContext length:", memoryContext.length);
-
-const systemPrompt = buildSystem(
-  pillarId,
-  profile,
-  language,
-  memoryContext
-);
-
-console.log("[chat] system prompt chars:", systemPrompt.length);
-console.log("[chat] memory context chars:", memoryContext.length);
+    const systemPrompt = buildSystem(language, searchContext, profile?.name || "");
+    console.log("[chat] system prompt chars:", systemPrompt.length);
 
     let rawReply;
     let usedFallback = false;
@@ -773,7 +433,6 @@ console.log("[chat] memory context chars:", memoryContext.length);
       usedFallback = result.usedFallback;
     } catch (firstErr) {
       lastErrorCode = firstErr.code || "SERVER_ERROR";
-
       if (lastErrorCode === "RATE_LIMIT" || lastErrorCode === "PROVIDER_TIMEOUT") {
         console.log("[chat] transient error, retrying once after 2s:", lastErrorCode);
         await sleep(2000);
@@ -783,10 +442,7 @@ console.log("[chat] memory context chars:", memoryContext.length);
           usedFallback = retryResult.usedFallback;
         } catch (secondErr) {
           lastErrorCode = secondErr.code || "SERVER_ERROR";
-          console.error("[chat] retry also failed", {
-            code: lastErrorCode,
-            message: secondErr?.message,
-          });
+          console.error("[chat] retry also failed", { code: lastErrorCode, message: secondErr?.message });
         }
       }
     }
@@ -799,19 +455,13 @@ console.log("[chat] memory context chars:", memoryContext.length);
         BAD_PROVIDER_RESPONSE: "The AI service gave an unexpected response. Please retry.",
         SERVER_ERROR: "The AI service had a problem. Please retry in a moment.",
       };
-
       return NextResponse.json(
-        {
-          error: true,
-          code: lastErrorCode,
-          message: messagesByCode[lastErrorCode] || messagesByCode.SERVER_ERROR,
-        },
+        { error: true, code: lastErrorCode, message: messagesByCode[lastErrorCode] || messagesByCode.SERVER_ERROR },
         { status: lastErrorCode === "RATE_LIMIT" ? 429 : 503 }
       );
     }
 
     const parsed = parseJSON(rawReply);
-
     if (!parsed) {
       console.error("[chat] validation error: AI response was not valid JSON. Raw:", rawReply?.slice(0, 300));
       return NextResponse.json(
@@ -820,65 +470,35 @@ console.log("[chat] memory context chars:", memoryContext.length);
       );
     }
 
-    let structured = sanitizeStructured(parsed);
+    const structured = sanitizeStructured(parsed);
 
-    // Temporary debug-field safety net for Job Finder, until platform
-    // memory (tracking role/city/status per user) replaces this with
-    // real derived state instead of model self-reporting.
-    if (pillarId === "jobs" && structured.needs_more_info === false) {
-      const roleKnown = parsed.role_known;
-      const locationKnown = parsed.location_known;
-      const statusKnown = parsed.status_known;
+    let verifiedStats = null;
+    if (userId) {
+      try {
+        const updates = extractNonEmptyUpdates(structured.facts_update);
+        if (Object.keys(updates).length > 0) {
+          searchState = await updateSearchState(userId, updates);
+        }
 
-      if (roleKnown === false || locationKnown === false || statusKnown === false) {
-        console.error("[chat] jobs backend override: model set needs_more_info=false despite a known flag being false", {
-          roleKnown, locationKnown, statusKnown,
-        });
+        verifiedStats = computeVerifiedStats(searchState);
 
-        structured = {
-          ...SAFE_DEFAULTS,
-          summary: structured.summary || "",
-          needs_more_info: true,
-          follow_up_question:
-            statusKnown === false
-              ? "Are you a fresher or do you have experience?"
-              : locationKnown === false
-              ? "Which city do you want to work in?"
-              : "What role are you looking for?",
-          help_hint: `💡 Tip:\n→ Fresher\n→ 2 years experience\n→ 6 months experience`,
-        };
+        if (structured.insight) {
+          await addSearchFact(userId, structured.insight);
+        }
+
+        if (structured.recommended_action) {
+          await setActiveSearchTask(userId, structured.recommended_action);
+        }
+      } catch (err) {
+        console.error("[chat] search state update failed (non-fatal):", err?.message);
       }
     }
-if (userId) {
-  console.log("[MEMORY DEBUG]", {
-    userId,
-    pillarId,
-    needs_more_info: structured.needs_more_info,
-    type: typeof structured.needs_more_info,
-    task: structured.task,
-  });
 
-  try {
-    await recordAssistantResponse(userId, pillarId, structured);
-    await recordAssistantResponse(userId, pillarId, structured);
-console.log("[MEMORY] recordAssistantResponse finished");
-    console.log("[MEMORY] recordAssistantResponse finished");
-  } catch (err) {
-    console.error("[MEMORY ERROR]", err);
-  }
-}
     return NextResponse.json({
-      reply: null,
       structured,
+      verified_stats: verifiedStats,
       language,
-      pillarId,
       engine: usedFallback ? "groq" : "gemini",
-      role_known: parsed.role_known,
-      location_known: parsed.location_known,
-      status_known: parsed.status_known,
-      role_value: parsed.role_value,
-      location_value: parsed.location_value,
-      status_value: parsed.status_value,
     });
   } catch (error) {
     console.error("[chat] full error:", error);
@@ -891,5 +511,5 @@ console.log("[MEMORY] recordAssistantResponse finished");
 }
 
 export async function GET() {
-  return NextResponse.json({ status: "LifePath AI running" });
-  }
+  return NextResponse.json({ status: "LifePath running — job search conversion intelligence" });
+}
