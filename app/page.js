@@ -135,9 +135,9 @@ export default function LifePath() {
   const [screen, setScreen] = useState("splash");
   const [phase, setPhase] = useState(0);
   const [messages, setMessages] = useState(() => {
-  const stored = S.get("lp_chat_history_v2", []);
-  return Array.isArray(stored) ? stored : [];
-});
+    const stored = S.get("lp_chat_history_v2", []);
+    return Array.isArray(stored) ? stored : [];
+  });
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [fbStates, setFbStates] = useState({});
@@ -249,6 +249,7 @@ export default function LifePath() {
     @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap');
     *{box-sizing:border-box;margin:0;padding:0}
     body{background:#060814;overscroll-behavior:none}
+    .app-shell{height:100vh;height:100dvh;overflow:hidden;display:flex;flex-direction:column}
     ::-webkit-scrollbar{width:2px}::-webkit-scrollbar-thumb{background:#1e293b;border-radius:2px}
     textarea,input,button{font-family:'Syne',sans-serif!important}
     textarea::placeholder{color:#334155!important}
@@ -261,7 +262,7 @@ export default function LifePath() {
   `;
 
   return (
-    <div style={{ minHeight: "100vh", background: "#060814", fontFamily: "'Syne','Segoe UI',sans-serif", maxWidth: 480, margin: "0 auto", display: "flex", flexDirection: "column", position: "relative", overflowX: "hidden" }}>
+    <div className="app-shell" style={{ background: "#060814", fontFamily: "'Syne','Segoe UI',sans-serif", maxWidth: 480, margin: "0 auto", position: "relative", overflowX: "hidden" }}>
       <style>{CSS}</style>
 
       {screen === "splash" && (
@@ -277,31 +278,84 @@ export default function LifePath() {
       )}
 
       {screen === "home" && (
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "32px 24px", zIndex: 1 }}>
-          <div style={{ fontSize: 26, fontWeight: 800, color: "#fff", textAlign: "center", lineHeight: 1.4, marginBottom: 12 }}>
-            Not getting responses<br />from your job applications?
+        <div style={{ flex: 1, overflowY: "auto", padding: "40px 22px 32px", zIndex: 1 }}>
+
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 14px", background: "rgba(99,102,241,.1)", border: "1px solid rgba(99,102,241,.25)", borderRadius: 100, marginBottom: 22 }}>
+            <span style={{ color: "#818cf8", fontSize: 11, fontWeight: 700, letterSpacing: 1 }}>✦ YOUR JOB SEARCH INTELLIGENCE</span>
           </div>
-          <div style={{ fontSize: 15, color: "#818cf8", fontWeight: 700, marginBottom: 28 }}>
-            Let's find out why.
+
+          <div style={{ fontSize: 28, fontWeight: 800, color: "#fff", lineHeight: 1.35, marginBottom: 10 }}>
+            Not getting responses from your job applications?
           </div>
-          <div style={{ color: "#64748b", fontSize: 13, textAlign: "center", lineHeight: 1.7, marginBottom: 36 }}>
-            Tell LifePath what's happening with your job search.<br />No forms. Just explain it in your own words.
+
+          <div style={{ fontSize: 16, color: "#818cf8", fontWeight: 700, marginBottom: 16 }}>
+            Stop guessing. Find what's holding your job search back.
           </div>
+
+          <div style={{ color: "#94a3b8", fontSize: 13.5, lineHeight: 1.75, marginBottom: 32 }}>
+            LifePath analyzes your applications, targeting, CV, and job-search patterns to find where you're losing opportunities — and shows you what to change next.
+          </div>
+
+          <div style={{ color: "#334155", fontSize: 10, fontWeight: 700, letterSpacing: 2, marginBottom: 14 }}>WHAT LIFEPATH DOES</div>
+
+          {[
+            { icon: "🔎", title: "Find what's holding you back", desc: "See the patterns behind your missed responses and interviews." },
+            { icon: "🎯", title: "Know what to change", desc: "Get a clear next move based on your actual job search — not generic advice." },
+            { icon: "🧪", title: "Test what works", desc: "Make one change, track the result, and learn what improves your response rate." },
+            { icon: "📈", title: "Turn your search into a system", desc: "LifePath remembers what you've tried and gets smarter about what works for you." },
+          ].map((f, i) => (
+            <div key={i} style={{ display: "flex", gap: 12, padding: "14px 0", borderBottom: i < 3 ? "1px solid rgba(255,255,255,.05)" : "none" }}>
+              <div style={{ fontSize: 20, flexShrink: 0 }}>{f.icon}</div>
+              <div>
+                <div style={{ color: "#e2e8f0", fontWeight: 700, fontSize: 13.5, marginBottom: 3 }}>{f.title}</div>
+                <div style={{ color: "#64748b", fontSize: 12.5, lineHeight: 1.6 }}>{f.desc}</div>
+              </div>
+            </div>
+          ))}
+
+          <div style={{ color: "#334155", fontSize: 10, fontWeight: 700, letterSpacing: 2, margin: "32px 0 16px" }}>HOW IT WORKS</div>
+
+          <div style={{ padding: "16px", background: "rgba(255,255,255,.02)", border: "1px solid rgba(255,255,255,.06)", borderRadius: 16, marginBottom: 32 }}>
+            {["Tell us what you've been doing", "LifePath analyzes your search", "Finds the likely bottleneck", "Shows what to change next", "Track the result"].map((step, i, arr) => (
+              <div key={i}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 22, height: 22, borderRadius: "50%", background: "rgba(99,102,241,.15)", border: "1px solid rgba(99,102,241,.3)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <span style={{ color: "#818cf8", fontSize: 10, fontWeight: 800 }}>{i + 1}</span>
+                  </div>
+                  <span style={{ color: "#cbd5e1", fontSize: 13 }}>{step}</span>
+                </div>
+                {i < arr.length - 1 && <div style={{ width: 1, height: 14, background: "rgba(99,102,241,.2)", marginLeft: 10 }} />}
+              </div>
+            ))}
+          </div>
+
           <button className="btn" onClick={startInvestigation}
-            style={{ width: "100%", padding: 16, background: "linear-gradient(135deg,#6366f1,#4f46e5)", border: "none", borderRadius: 14, color: "#fff", fontWeight: 800, fontSize: 15, boxShadow: "0 8px 24px rgba(99,102,241,.25)" }}>
-            Tell me what's happening →
+            style={{ width: "100%", padding: 17, background: "linear-gradient(135deg,#6366f1,#4f46e5)", border: "none", borderRadius: 14, color: "#fff", fontWeight: 800, fontSize: 15, boxShadow: "0 8px 24px rgba(99,102,241,.3)" }}>
+            Find out what's holding me back →
           </button>
+
+          <div style={{ color: "#475569", fontSize: 11, textAlign: "center", marginTop: 12 }}>
+            No forms. Start by telling us what's happening.
+          </div>
         </div>
       )}
 
       {screen === "chat" && (
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", zIndex: 1 }}>
-          <div style={{ padding: "14px 16px", background: "rgba(6,8,20,.97)", borderBottom: "1px solid rgba(255,255,255,.05)", backdropFilter: "blur(24px)", position: "sticky", top: 0, zIndex: 10 }}>
-            <div style={{ color: "#fff", fontWeight: 800, fontSize: 15 }}>LifePath</div>
-            <div style={{ color: "#475569", fontSize: 10, letterSpacing: 1 }}>JOB SEARCH INVESTIGATION</div>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, zIndex: 1 }}>
+          <div style={{ padding: "14px 16px", background: "rgba(6,8,20,.97)", borderBottom: "1px solid rgba(255,255,255,.05)", backdropFilter: "blur(24px)", flexShrink: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <div style={{ color: "#fff", fontWeight: 800, fontSize: 15 }}>LifePath</div>
+                <div style={{ color: "#475569", fontSize: 10, letterSpacing: 1 }}>JOB SEARCH INVESTIGATION</div>
+              </div>
+              <button className="btn" onClick={() => setScreen("home")}
+                style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 10, padding: "6px 12px", color: "#64748b", fontSize: 11 }}>
+                ‹ Back
+              </button>
+            </div>
           </div>
 
-          <div style={{ flex: 1, overflowY: "auto", padding: "16px 13px" }}>
+          <div style={{ flex: 1, overflowY: "auto", padding: "16px 13px", minHeight: 0 }}>
             {messages.length === 0 && (
               <div style={{ padding: "12px 16px", color: "#94a3b8", fontSize: 14, lineHeight: 1.7 }}>
                 Tell me what's going on — for example, "I've applied to 100+ jobs and nobody is responding."
@@ -339,7 +393,7 @@ export default function LifePath() {
             <div ref={bottomRef} />
           </div>
 
-          <div style={{ padding: "10px 13px 24px", background: "rgba(6,8,20,.97)", borderTop: "1px solid rgba(255,255,255,.04)" }}>
+          <div style={{ flexShrink: 0, padding: "10px 13px 20px", background: "rgba(6,8,20,.97)", borderTop: "1px solid rgba(255,255,255,.04)" }}>
             <div style={{ display: "flex", gap: 9, alignItems: "flex-end" }}>
               <textarea
                 ref={textareaRef}
