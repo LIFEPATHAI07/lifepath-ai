@@ -134,7 +134,10 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbE
 export default function LifePath() {
   const [screen, setScreen] = useState("splash");
   const [phase, setPhase] = useState(0);
-  const [messages, setMessages] = useState(() => S.get("lp_chat_history", []));
+  const [messages, setMessages] = useState(() => {
+  const stored = S.get("lp_chat_history_v2", []);
+  return Array.isArray(stored) ? stored : [];
+});
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [fbStates, setFbStates] = useState({});
@@ -157,7 +160,7 @@ export default function LifePath() {
   }, []);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, loading]);
-  useEffect(() => { if (messages.length > 0) S.set("lp_chat_history", messages); }, [messages]);
+  useEffect(() => { if (messages.length > 0) S.set("lp_chat_history_v2", messages); }, [messages]);
 
   const startInvestigation = () => {
     setScreen("chat");
