@@ -414,4 +414,4 @@ export default function LifePath() {
       )}
     </div>
   );
-          }
+                         }
