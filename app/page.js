@@ -299,13 +299,13 @@ export default function LifePath() {
           <div style={{ color: "#334155", fontSize: 10, fontWeight: 700, letterSpacing: 2, marginBottom: 14 }}>WHAT LIFEPATH DOES</div>
 
           {[
-            { icon: "🔎", title: "Find what's holding you back", desc: "See the patterns behind your missed responses and interviews." },
-            { icon: "🎯", title: "Know what to change", desc: "Get a clear next move based on your actual job search — not generic advice." },
-            { icon: "🧪", title: "Test what works", desc: "Make one change, track the result, and learn what improves your response rate." },
-            { icon: "📈", title: "Turn your search into a system", desc: "LifePath remembers what you've tried and gets smarter about what works for you." },
+            { title: "Find what's holding you back", desc: "See the patterns behind your missed responses and interviews." },
+            { title: "Know what to change", desc: "Get a clear next move based on your actual job search — not generic advice." },
+            { title: "Test what works", desc: "Make one change, track the result, and learn what improves your response rate." },
+            { title: "Turn your search into a system", desc: "LifePath remembers what you've tried and gets smarter about what works for you." },
           ].map((f, i) => (
             <div key={i} style={{ display: "flex", gap: 12, padding: "14px 0", borderBottom: i < 3 ? "1px solid rgba(255,255,255,.05)" : "none" }}>
-              <div style={{ fontSize: 20, flexShrink: 0 }}>{f.icon}</div>
+              <div style={{ width: 4, height: 4, borderRadius: "50%", background: "#6366f1", flexShrink: 0, marginTop: 8 }} />
               <div>
                 <div style={{ color: "#e2e8f0", fontWeight: 700, fontSize: 13.5, marginBottom: 3 }}>{f.title}</div>
                 <div style={{ color: "#64748b", fontSize: 12.5, lineHeight: 1.6 }}>{f.desc}</div>
@@ -330,7 +330,7 @@ export default function LifePath() {
           </div>
 
           <button className="btn" onClick={startInvestigation}
-            style={{ width: "100%", padding: 17, background: "linear-gradient(135deg,#6366f1,#4f46e5)", border: "none", borderRadius: 14, color: "#fff", fontWeight: 800, fontSize: 15, boxShadow: "0 8px 24px rgba(99,102,241,.3)" }}>
+            style={{ width: "100%", padding: 17, background: "linear-gradient(135deg,#6366f1,#4f46e5)", border: "none", borderRadius: 14, color: "#fff", fontWeight: 800, fontSize: 15, textAlign: "center", boxShadow: "0 8px 24px rgba(99,102,241,.3)" }}>
             Find out what's holding me back →
           </button>
 
