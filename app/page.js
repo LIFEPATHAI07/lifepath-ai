@@ -293,7 +293,7 @@ export default function LifePath() {
           </div>
 
           <div style={{ color: "#94a3b8", fontSize: 13.5, lineHeight: 1.75, marginBottom: 32 }}>
-            LifePath analyzes your applications, targeting, CV, and job-search patterns to find where you're losing opportunities — and shows you what to change next.
+            You don't need more job listings. You need to understand why your applications aren't converting — and what to change. LifePath analyzes your actual search to find the answer.
           </div>
 
           <div style={{ color: "#334155", fontSize: 10, fontWeight: 700, letterSpacing: 2, marginBottom: 14 }}>WHAT LIFEPATH DOES</div>
@@ -345,8 +345,8 @@ export default function LifePath() {
           <div style={{ padding: "14px 16px", background: "rgba(6,8,20,.97)", borderBottom: "1px solid rgba(255,255,255,.05)", backdropFilter: "blur(24px)", flexShrink: 0 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div>
+                <div>
                 <div style={{ color: "#fff", fontWeight: 800, fontSize: 15 }}>LifePath</div>
-                <div style={{ color: "#475569", fontSize: 10, letterSpacing: 1 }}>JOB SEARCH INVESTIGATION</div>
               </div>
               <button className="btn" onClick={() => setScreen("home")}
                 style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 10, padding: "6px 12px", color: "#64748b", fontSize: 11 }}>
