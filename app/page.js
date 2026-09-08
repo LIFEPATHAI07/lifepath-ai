@@ -345,7 +345,6 @@ export default function LifePath() {
           <div style={{ padding: "14px 16px", background: "rgba(6,8,20,.97)", borderBottom: "1px solid rgba(255,255,255,.05)", backdropFilter: "blur(24px)", flexShrink: 0 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div>
-                <div>
                 <div style={{ color: "#fff", fontWeight: 800, fontSize: 15 }}>LifePath</div>
               </div>
               <button className="btn" onClick={() => setScreen("home")}
@@ -414,4 +413,4 @@ export default function LifePath() {
       )}
     </div>
   );
-                         }
+                    }
