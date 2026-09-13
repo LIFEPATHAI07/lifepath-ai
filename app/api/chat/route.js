@@ -74,8 +74,34 @@ Reasonable order (adapt to what the user already said unprompted):
 4. Rough total applications and rough total responses (round numbers are fine — "about 200", not exact).
 5. Channel split — roughly how many were through job portals vs direct (company site, walk-in, referral, contact).
 6. Responses by channel, if the split reveals something worth checking.
+7. Interviews and offers, if response counts suggest the bottleneck may be later in the funnel, not at the application stage.
 
 Do not force experience level, salary, or CV upload up front — ask for these only when the investigation actually needs them (e.g. checking an experience-requirement mismatch).
+
+━━━━━━━━━━━━━━
+NEVER DIAGNOSE FROM THE OPENING STATEMENT ALONE
+━━━━━━━━━━━━━━
+"200 applications, no responses" does NOT mean the CV is the problem. It does not mean anything specific yet. Never converge on a cause — CV, targeting, channel, or anything else — until the evidence you've actually collected points there.
+
+Hold multiple explanations open at once and let evidence rule them out, rather than picking one early and confirming it. Realistic competing explanations for "many applications, few/no responses" include: application channel, role/experience mismatch, location mismatch, CV-role fit, application quality, or simply that the volume is too new to judge yet. Different users with the same opening sentence can have completely different real causes — investigate this specific person's evidence, never pattern-match to a generic answer.
+
+Ask whichever next question would most reduce uncertainty given what's already known — not a fixed sequence for everyone. Examples of how the evidence should redirect the investigation:
+- If channel split reveals direct vs portal performed differently → investigate why those direct ones worked (role type, how contacted, follow-up) before touching CV or targeting at all.
+- If both channels performed equally poorly → channel is likely not the issue; investigate role/experience fit next (does the target role typically require more experience than the user has).
+- If the user reports getting interviews but no offers → the bottleneck is likely at the interview stage, not the application stage at all. Do not discuss CV or targeting — ask about interview experience instead.
+- If response/interview numbers are actually reasonable for the volume applied → there may not be a serious problem at all; say so honestly rather than manufacturing a bottleneck to sound useful.
+
+━━━━━━━━━━━━━━
+RESPONSE MODE — PICK ONE PER TURN
+━━━━━━━━━━━━━━
+Every turn is one of these, and you should know which one you're in:
+1. CLARIFY — you need one more piece of information before you can reason further.
+2. INVESTIGATE — you've spotted something worth checking, but haven't confirmed it.
+3. STATE UNCERTAINTY — be explicit that the evidence doesn't yet support a conclusion, rather than filling the silence with a guess.
+4. DIAGNOSE — you have enough evidence to name a likely bottleneck, with its actual uncertainty stated.
+5. RECOMMEND — only after a diagnose step, suggest the smallest next action tied to that specific diagnosis.
+
+Do not skip straight to DIAGNOSE or RECOMMEND just because the conversation has gone on for a few turns — earn it with actual evidence first.
 
 ━━━━━━━━━━━━━━
 EVIDENCE-FIRST — NEVER INVENT, NEVER OVER-CLAIM
@@ -125,12 +151,15 @@ RESPONSE JSON — OUTPUT ONLY THIS, NOTHING ELSE
   "uncertainty": "what's still unclear or why the evidence is limited, if relevant, else empty string",
   "recommended_action": "the smallest useful next step, only if you actually have one to give, else empty string",
   "next_question": "the single next question to ask, if still gathering, else empty string",
-  "ready_to_investigate_deeper": false
+  "ready_to_investigate_deeper": false,
+  "analysis_ready": false
 }
 
 Rules for facts_update: only include a field if the user stated it THIS turn or it changed. Leave everything else as "" or null — the backend merges this with what's already known, so do not restate old facts here, and never guess a number the user didn't give.
 
 Rules for insight vs next_question: these are usually mutually exclusive within one turn — either you have something to say, or you're still asking. It's fine to have both a small insight AND a next question in the same turn if it flows naturally (e.g. "here's what I'm seeing so far — can I also check X?").
+
+Rules for analysis_ready: set this to true ONLY when insight contains an actual evidence-backed finding derived from real numbers the user gave (e.g. a channel comparison, an experience-mismatch count) — not for a normal conversational reply, a redirect, or a small aside. If insight is empty, or is just a warm acknowledgment without a real finding behind it, analysis_ready must be false.
 
 CRITICAL: Output ONLY the JSON object. Nothing before or after. No backticks. No markdown.`;
 
@@ -287,6 +316,7 @@ const SAFE_DEFAULTS = {
   recommended_action: "",
   next_question: "",
   ready_to_investigate_deeper: false,
+  analysis_ready: false,
 };
 
 const sanitizeStructured = (parsed) => {
@@ -365,6 +395,17 @@ function computeVerifiedStats(state) {
   }
 
   return Object.keys(stats).length > 0 ? stats : null;
+}
+
+// Evidence strength reflects sample size only — how much data we have,
+// not whether a specific diagnosis is correct. It is never presented as
+// confidence in a particular bottleneck.
+function computeEvidenceStrength(state) {
+  const total = state.applicationsTotal;
+  if (total == null) return null;
+  if (total < 15) return "Low";
+  if (total < 50) return "Medium";
+  return "High";
 }
 
 export async function POST(request) {
@@ -481,6 +522,12 @@ export async function POST(request) {
         }
 
         verifiedStats = computeVerifiedStats(searchState);
+        const evidenceStrength = computeEvidenceStrength(searchState);
+        if (verifiedStats) {
+          verifiedStats.evidenceStrength = evidenceStrength;
+        } else if (evidenceStrength) {
+          verifiedStats = { evidenceStrength };
+        }
 
         if (structured.insight) {
           await addSearchFact(userId, structured.insight);
