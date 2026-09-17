@@ -44,32 +44,53 @@ const MessageBubbleUser = ({ content }) => (
 
 const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbError }) => {
   if (!data) return null;
-  const { reply, insight, uncertainty, recommended_action, next_question, ready_to_investigate_deeper } = data;
+  const { reply, insight, uncertainty, recommended_action, next_question, tip, ready_to_investigate_deeper } = data;
+  const isAnalysis = data.analysis_ready === true;
+  const hasVerifiedNumbers = data.verified_stats && (data.verified_stats.portalRate != null || data.verified_stats.directRate != null);
 
   return (
     <div style={{ marginBottom: 16, animation: "fadeUp .3s both" }}>
-      <div style={{ borderRadius: "4px 16px 16px 16px", overflow: "hidden", border: "1px solid rgba(99,102,241,.15)", background: "rgba(255,255,255,.02)" }}>
+      <div style={{ borderRadius: "4px 16px 16px 16px", overflow: "hidden", border: isAnalysis ? "1px solid rgba(99,102,241,.3)" : "1px solid rgba(99,102,241,.15)", background: "rgba(255,255,255,.02)" }}>
 
-        {reply && (
+        {reply && !isAnalysis && (
           <div style={{ padding: "14px 16px", color: "#e2e8f0", fontSize: 14, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
             {reply}
           </div>
         )}
 
+        {isAnalysis && (
+          <div style={{ padding: "14px 16px", background: "rgba(99,102,241,.05)", borderBottom: "1px solid rgba(255,255,255,.05)" }}>
+            <div style={{ color: "#818cf8", fontSize: 10, fontWeight: 800, letterSpacing: 2, marginBottom: 8 }}>YOUR JOB SEARCH</div>
+            {reply && <div style={{ color: "#94a3b8", fontSize: 12.5, lineHeight: 1.6 }}>{reply}</div>}
+          </div>
+        )}
+
         {insight && (
-          <div style={{ padding: "12px 16px", background: "rgba(99,102,241,.06)", borderTop: "1px solid rgba(255,255,255,.05)" }}>
-            <div style={{ color: "#818cf8", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 5 }}>🔍 SIGNAL FOUND</div>
+          <div style={{ padding: "14px 16px", background: "rgba(99,102,241,.06)", borderTop: isAnalysis ? "none" : "1px solid rgba(255,255,255,.05)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 7 }}>
+              <span style={{ color: "#818cf8", fontSize: 9, fontWeight: 700, letterSpacing: 2 }}>{isAnalysis ? "WHAT WE FOUND" : "🔍 SIGNAL FOUND"}</span>
+              {data.verified_stats?.evidenceStrength && (
+                <span title="Reflects how much data we have, not certainty about the cause" style={{
+                  fontSize: 9, fontWeight: 800, letterSpacing: 1, padding: "3px 8px", borderRadius: 100,
+                  color: data.verified_stats.evidenceStrength === "Low" ? "#f59e0b" : data.verified_stats.evidenceStrength === "Medium" ? "#818cf8" : "#10b981",
+                  background: data.verified_stats.evidenceStrength === "Low" ? "rgba(245,158,11,.1)" : data.verified_stats.evidenceStrength === "Medium" ? "rgba(99,102,241,.1)" : "rgba(16,185,129,.1)",
+                }}>
+                  EVIDENCE: {data.verified_stats.evidenceStrength?.toUpperCase()}
+                </span>
+              )}
+            </div>
             <div style={{ color: "#c7d2fe", fontSize: 13, lineHeight: 1.6 }}>{insight}</div>
           </div>
         )}
 
         {uncertainty && (
-          <div style={{ padding: "10px 16px", borderTop: "1px solid rgba(255,255,255,.04)" }}>
-            <div style={{ color: "#64748b", fontSize: 11, lineHeight: 1.6, fontStyle: "italic" }}>⚠️ {uncertainty}</div>
+          <div style={{ padding: "12px 16px", borderTop: "1px solid rgba(255,255,255,.04)" }}>
+            <div style={{ color: "#94a3b8", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 5 }}>{isAnalysis ? "WHAT WE DON'T KNOW YET" : "⚠️ UNCERTAINTY"}</div>
+            <div style={{ color: "#64748b", fontSize: 12, lineHeight: 1.6 }}>{uncertainty}</div>
           </div>
         )}
 
-        {data.verified_stats && (
+        {hasVerifiedNumbers && (
           <div style={{ padding: "12px 16px", background: "rgba(16,185,129,.04)", borderTop: "1px solid rgba(255,255,255,.04)" }}>
             <div style={{ color: "#10b981", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 6 }}>✅ VERIFIED FROM YOUR NUMBERS</div>
             {data.verified_stats.portalRate != null && (
@@ -87,8 +108,17 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbE
 
         {recommended_action && (
           <div style={{ padding: "14px 16px", background: "rgba(245,158,11,.05)", borderTop: "1px solid rgba(255,255,255,.04)" }}>
-            <div style={{ color: "#f59e0b", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 6 }}>🎯 SMALLEST NEXT STEP</div>
+            <div style={{ color: "#f59e0b", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 6 }}>{isAnalysis ? "WHAT WE'D INVESTIGATE NEXT" : "🎯 SMALLEST NEXT STEP"}</div>
             <div style={{ color: "#fbbf24", fontSize: 13, lineHeight: 1.6, fontWeight: 600 }}>{recommended_action}</div>
+          </div>
+        )}
+
+        {tip && (
+          <div style={{ padding: "10px 16px", borderTop: "1px solid rgba(255,255,255,.04)" }}>
+            <div style={{ display: "flex", gap: 7, alignItems: "flex-start" }}>
+              <span style={{ color: "#475569", fontSize: 11 }}>💡</span>
+              <span style={{ color: "#64748b", fontSize: 11.5, lineHeight: 1.6, fontStyle: "italic" }}>{tip}</span>
+            </div>
           </div>
         )}
 
@@ -139,12 +169,16 @@ export default function LifePath() {
     return Array.isArray(stored) ? stored : [];
   });
   const [input, setInput] = useState("");
+  const [cvFile, setCvFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [fbStates, setFbStates] = useState({});
   const [fbErrors, setFbErrors] = useState({});
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
+  const fileRef = useRef(null);
+  const pdfJsLoaded = useRef(false);
   const sendingRef = useRef(false);
 
   useEffect(() => {
@@ -166,9 +200,73 @@ export default function LifePath() {
     setScreen("chat");
   };
 
+  const loadPdfJs = async () => {
+    if (pdfJsLoaded.current && window.pdfjsLib) return true;
+    return new Promise((resolve) => {
+      const script = document.createElement("script");
+      script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+      script.onload = () => {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+        pdfJsLoaded.current = true;
+        resolve(true);
+      };
+      script.onerror = () => resolve(false);
+      document.head.appendChild(script);
+    });
+  };
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (fileRef.current) fileRef.current.value = "";
+
+    if (file.name.toLowerCase().endsWith(".pdf")) {
+      try {
+        const loaded = await loadPdfJs();
+        if (!loaded || !window.pdfjsLib) throw new Error("unavailable");
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        let fullText = "";
+        for (let i = 1; i <= Math.min(pdf.numPages, 5); i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          fullText += content.items.map((item) => item.str).join(" ") + "\n";
+        }
+        if (fullText.trim().length > 80) {
+          setCvFile({ name: file.name, text: fullText.trim() });
+        } else {
+          throw new Error("empty extraction");
+        }
+      } catch {
+        setCvFile(null);
+        setMessages((m) => [...m, { role: "assistant", content: "⚠️ Couldn't read that PDF. You can paste your CV text directly in the message box instead.", structured: null }]);
+      }
+      return;
+    }
+
+    if (file.name.toLowerCase().endsWith(".txt")) {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const text = ev.target.result;
+        if (!text || text.trim().length < 30) {
+          setMessages((m) => [...m, { role: "assistant", content: "⚠️ Couldn't read that file. You can paste your CV text directly in the message box instead.", structured: null }]);
+          return;
+        }
+        setCvFile({ name: file.name, text: text.trim() });
+      };
+      reader.onerror = () => {
+        setMessages((m) => [...m, { role: "assistant", content: "⚠️ File error. You can paste your CV text directly instead.", structured: null }]);
+      };
+      reader.readAsText(file);
+      return;
+    }
+
+    setMessages((m) => [...m, { role: "assistant", content: "⚠️ Please upload a PDF or TXT file — other formats aren't supported yet. You can paste your CV text directly instead.", structured: null }]);
+  };
+
   const sendMessage = async (overrideText) => {
     const userMsg = (overrideText || input).trim();
-    if (!userMsg || loading || sendingRef.current) return;
+    if ((!userMsg && !cvFile) || loading || sendingRef.current) return;
     sendingRef.current = true;
 
     const usage = getUsage();
@@ -178,13 +276,16 @@ export default function LifePath() {
       return;
     }
 
+    const attachedCv = cvFile;
     setInput("");
+    setCvFile(null);
 
     const MAX_HISTORY_MESSAGES = 12;
     const MAX_MESSAGE_CHARS = 1200;
-    const truncate = (text) => {
+    const MAX_CV_CHARS = 2500;
+    const truncate = (text, max = MAX_MESSAGE_CHARS) => {
       if (!text) return "";
-      return text.length > MAX_MESSAGE_CHARS ? text.slice(0, MAX_MESSAGE_CHARS) + " ...[truncated]" : text;
+      return text.length > max ? text.slice(0, max) + " ...[truncated]" : text;
     };
 
     const fullApiMessages = messages
@@ -198,9 +299,18 @@ export default function LifePath() {
       .filter(m => m.content);
 
     const apiMessages = fullApiMessages.slice(-MAX_HISTORY_MESSAGES);
-    apiMessages.push({ role: "user", content: truncate(userMsg) });
 
-    const newMsgs = [...messages, { role: "user", content: userMsg }];
+    let outgoingText = truncate(userMsg);
+    let displayText = userMsg;
+    if (attachedCv) {
+      const cvBlock = `[CV attached: ${attachedCv.name}]\n${truncate(attachedCv.text, MAX_CV_CHARS)}`;
+      outgoingText = outgoingText ? `${outgoingText}\n\n${cvBlock}` : cvBlock;
+      displayText = userMsg ? `${userMsg}\n\n📎 ${attachedCv.name}` : `📎 ${attachedCv.name}`;
+    }
+
+    apiMessages.push({ role: "user", content: outgoingText });
+
+    const newMsgs = [...messages, { role: "user", content: displayText }];
     setMessages(newMsgs);
     setLoading(true);
     S.set("lp_usage", { ...usage, count: usage.count + 1 });
@@ -243,6 +353,15 @@ export default function LifePath() {
       setFbStates(s => ({ ...s, [msgIndex]: "error" }));
       setFbErrors(e => ({ ...e, [msgIndex]: result.error }));
     }
+  };
+
+  const clearChat = () => {
+    setMessages([]);
+    setFbStates({});
+    setFbErrors({});
+    setCvFile(null);
+    S.set("lp_chat_history_v2", []);
+    setShowClearConfirm(false);
   };
 
   const CSS = `
@@ -347,12 +466,41 @@ export default function LifePath() {
               <div>
                 <div style={{ color: "#fff", fontWeight: 800, fontSize: 15 }}>LifePath</div>
               </div>
-              <button className="btn" onClick={() => setScreen("home")}
-                style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 10, padding: "6px 12px", color: "#64748b", fontSize: 11 }}>
-                ‹ Back
-              </button>
+              <div style={{ display: "flex", gap: 8 }}>
+                {messages.length > 0 && (
+                  <button className="btn" onClick={() => setShowClearConfirm(true)}
+                    style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 10, padding: "6px 12px", color: "#64748b", fontSize: 11 }}>
+                    Clear chat
+                  </button>
+                )}
+                <button className="btn" onClick={() => setScreen("home")}
+                  style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 10, padding: "6px 12px", color: "#64748b", fontSize: 11 }}>
+                  ‹ Back
+                </button>
+              </div>
             </div>
           </div>
+
+          {showClearConfirm && (
+            <div onClick={() => setShowClearConfirm(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+              <div onClick={(e) => e.stopPropagation()} style={{ background: "#0d1020", border: "1px solid rgba(255,255,255,.1)", borderRadius: 16, padding: 20, maxWidth: 320, width: "100%" }}>
+                <div style={{ color: "#fff", fontWeight: 700, fontSize: 14, marginBottom: 8 }}>Clear this conversation?</div>
+                <div style={{ color: "#94a3b8", fontSize: 12.5, lineHeight: 1.6, marginBottom: 18 }}>
+                  This removes the current chat and starts fresh. This can't be undone.
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button className="btn" onClick={() => setShowClearConfirm(false)}
+                    style={{ flex: 1, padding: "10px", background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)", borderRadius: 10, color: "#94a3b8", fontSize: 12.5, fontFamily: "inherit" }}>
+                    Cancel
+                  </button>
+                  <button className="btn" onClick={clearChat}
+                    style={{ flex: 1, padding: "10px", background: "rgba(239,68,68,.12)", border: "1px solid rgba(239,68,68,.3)", borderRadius: 10, color: "#ef4444", fontWeight: 700, fontSize: 12.5, fontFamily: "inherit" }}>
+                    Clear chat
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div style={{ flex: 1, overflowY: "auto", padding: "16px 13px", minHeight: 0 }}>
             {messages.length === 0 && (
@@ -393,7 +541,18 @@ export default function LifePath() {
           </div>
 
           <div style={{ flexShrink: 0, padding: "10px 13px 20px", background: "rgba(6,8,20,.97)", borderTop: "1px solid rgba(255,255,255,.04)" }}>
+            {cvFile && (
+              <div style={{ marginBottom: 9, padding: "7px 13px", background: "rgba(99,102,241,.07)", border: "1px solid rgba(99,102,241,.2)", borderRadius: 10, color: "#818cf8", fontSize: 11, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>📎 {cvFile.name}</span>
+                <button onClick={() => setCvFile(null)} style={{ background: "none", border: "none", color: "#ef4444", fontSize: 13, cursor: "pointer" }}>✕</button>
+              </div>
+            )}
             <div style={{ display: "flex", gap: 9, alignItems: "flex-end" }}>
+              <input ref={fileRef} type="file" accept=".pdf,.txt" onChange={handleFileUpload} style={{ display: "none" }} />
+              <button className="btn" onClick={() => fileRef.current?.click()}
+                style={{ width: 44, height: 44, borderRadius: 13, flexShrink: 0, background: "rgba(99,102,241,.08)", border: "1px solid rgba(99,102,241,.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>
+                📎
+              </button>
               <textarea
                 ref={textareaRef}
                 value={input}
@@ -403,8 +562,8 @@ export default function LifePath() {
                 rows={2}
                 style={{ flex: 1, background: "rgba(255,255,255,.03)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 14, padding: "11px 13px", color: "#e2e8f0", fontSize: 14, resize: "none", lineHeight: 1.5 }}
               />
-              <button className="btn" onClick={() => sendMessage()} disabled={loading || !input.trim() || sendingRef.current}
-                style={{ width: 44, height: 44, borderRadius: 13, flexShrink: 0, background: loading || !input.trim() ? "rgba(255,255,255,.04)" : "linear-gradient(135deg,#6366f1,#4f46e5)", border: "none", cursor: loading || !input.trim() ? "not-allowed" : "pointer", fontSize: 18 }}>
+              <button className="btn" onClick={() => sendMessage()} disabled={loading || (!input.trim() && !cvFile) || sendingRef.current}
+                style={{ width: 44, height: 44, borderRadius: 13, flexShrink: 0, background: loading || (!input.trim() && !cvFile) ? "rgba(255,255,255,.04)" : "linear-gradient(135deg,#6366f1,#4f46e5)", border: "none", cursor: loading || (!input.trim() && !cvFile) ? "not-allowed" : "pointer", fontSize: 18 }}>
                 {loading ? "⏳" : "↑"}
               </button>
             </div>
@@ -413,4 +572,4 @@ export default function LifePath() {
       )}
     </div>
   );
-                    }
+                           }
