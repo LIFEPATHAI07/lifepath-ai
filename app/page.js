@@ -170,10 +170,12 @@ export default function LifePath() {
   });
   const [input, setInput] = useState("");
   const [cvFile, setCvFile] = useState(null);
+  const [extracting, setExtracting] = useState(false);
   const [loading, setLoading] = useState(false);
   const [fbStates, setFbStates] = useState({});
   const [fbErrors, setFbErrors] = useState({});
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
@@ -217,17 +219,19 @@ export default function LifePath() {
 
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    // Always reset so selecting the exact same file again still fires onChange.
     if (fileRef.current) fileRef.current.value = "";
+    if (!file) return;
 
     if (file.name.toLowerCase().endsWith(".pdf")) {
+      setExtracting(true);
       try {
         const loaded = await loadPdfJs();
-        if (!loaded || !window.pdfjsLib) throw new Error("unavailable");
+        if (!loaded || !window.pdfjsLib) throw new Error("pdfjs-unavailable");
         const arrayBuffer = await file.arrayBuffer();
         const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
         let fullText = "";
-        for (let i = 1; i <= Math.min(pdf.numPages, 5); i++) {
+        for (let i = 1; i <= Math.min(pdf.numPages, 8); i++) {
           const page = await pdf.getPage(i);
           const content = await page.getTextContent();
           fullText += content.items.map((item) => item.str).join(" ") + "\n";
@@ -235,19 +239,22 @@ export default function LifePath() {
         if (fullText.trim().length > 80) {
           setCvFile({ name: file.name, text: fullText.trim() });
         } else {
-          throw new Error("empty extraction");
+          setMessages((m) => [...m, { role: "assistant", content: "⚠️ This PDF doesn't appear to have readable text — it may be a scanned image. Please paste your CV text directly in the message box instead.", structured: null }]);
         }
       } catch {
-        setCvFile(null);
-        setMessages((m) => [...m, { role: "assistant", content: "⚠️ Couldn't read that PDF. You can paste your CV text directly in the message box instead.", structured: null }]);
+        setMessages((m) => [...m, { role: "assistant", content: "⚠️ Couldn't read that PDF. It may be corrupted or scanned. You can paste your CV text directly in the message box instead.", structured: null }]);
+      } finally {
+        setExtracting(false);
       }
       return;
     }
 
     if (file.name.toLowerCase().endsWith(".txt")) {
+      setExtracting(true);
       const reader = new FileReader();
       reader.onload = (ev) => {
         const text = ev.target.result;
+        setExtracting(false);
         if (!text || text.trim().length < 30) {
           setMessages((m) => [...m, { role: "assistant", content: "⚠️ Couldn't read that file. You can paste your CV text directly in the message box instead.", structured: null }]);
           return;
@@ -255,6 +262,7 @@ export default function LifePath() {
         setCvFile({ name: file.name, text: text.trim() });
       };
       reader.onerror = () => {
+        setExtracting(false);
         setMessages((m) => [...m, { role: "assistant", content: "⚠️ File error. You can paste your CV text directly instead.", structured: null }]);
       };
       reader.readAsText(file);
@@ -282,7 +290,7 @@ export default function LifePath() {
 
     const MAX_HISTORY_MESSAGES = 12;
     const MAX_MESSAGE_CHARS = 1200;
-    const MAX_CV_CHARS = 2500;
+    const MAX_CV_CHARS = 10000;
     const truncate = (text, max = MAX_MESSAGE_CHARS) => {
       if (!text) return "";
       return text.length > max ? text.slice(0, max) + " ...[truncated]" : text;
@@ -355,13 +363,32 @@ export default function LifePath() {
     }
   };
 
-  const clearChat = () => {
-    setMessages([]);
-    setFbStates({});
-    setFbErrors({});
-    setCvFile(null);
-    S.set("lp_chat_history_v2", []);
-    setShowClearConfirm(false);
+  // True clear: resets the persisted server-side investigation state,
+  // then clears local UI state. If the server reset fails, we tell the
+  // user rather than silently pretending it worked.
+  const clearChat = async () => {
+    setClearing(true);
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "clear_search", userId: getUserId() }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.message || "Could not reset your investigation.");
+
+      setMessages([]);
+      setFbStates({});
+      setFbErrors({});
+      setCvFile(null);
+      S.set("lp_chat_history_v2", []);
+      setShowClearConfirm(false);
+    } catch (err) {
+      setShowClearConfirm(false);
+      setMessages(m => [...m, { role: "assistant", content: `⚠️ ${err.message || "Could not fully reset. Please try again."}`, structured: null }]);
+    } finally {
+      setClearing(false);
+    }
   };
 
   const CSS = `
@@ -482,20 +509,20 @@ export default function LifePath() {
           </div>
 
           {showClearConfirm && (
-            <div onClick={() => setShowClearConfirm(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+            <div onClick={() => !clearing && setShowClearConfirm(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
               <div onClick={(e) => e.stopPropagation()} style={{ background: "#0d1020", border: "1px solid rgba(255,255,255,.1)", borderRadius: 16, padding: 20, maxWidth: 320, width: "100%" }}>
                 <div style={{ color: "#fff", fontWeight: 700, fontSize: 14, marginBottom: 8 }}>Clear this conversation?</div>
                 <div style={{ color: "#94a3b8", fontSize: 12.5, lineHeight: 1.6, marginBottom: 18 }}>
-                  This removes the current chat and starts fresh. This can't be undone.
+                  This resets your entire investigation — role, applications, everything LifePath has learned so far. This can't be undone.
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button className="btn" onClick={() => setShowClearConfirm(false)}
+                  <button className="btn" onClick={() => setShowClearConfirm(false)} disabled={clearing}
                     style={{ flex: 1, padding: "10px", background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)", borderRadius: 10, color: "#94a3b8", fontSize: 12.5, fontFamily: "inherit" }}>
                     Cancel
                   </button>
-                  <button className="btn" onClick={clearChat}
+                  <button className="btn" onClick={clearChat} disabled={clearing}
                     style={{ flex: 1, padding: "10px", background: "rgba(239,68,68,.12)", border: "1px solid rgba(239,68,68,.3)", borderRadius: 10, color: "#ef4444", fontWeight: 700, fontSize: 12.5, fontFamily: "inherit" }}>
-                    Clear chat
+                    {clearing ? "Clearing..." : "Clear chat"}
                   </button>
                 </div>
               </div>
@@ -541,16 +568,27 @@ export default function LifePath() {
           </div>
 
           <div style={{ flexShrink: 0, padding: "10px 13px 20px", background: "rgba(6,8,20,.97)", borderTop: "1px solid rgba(255,255,255,.04)" }}>
-            {cvFile && (
+            {extracting && (
+              <div style={{ marginBottom: 9, padding: "7px 13px", background: "rgba(99,102,241,.07)", border: "1px solid rgba(99,102,241,.2)", borderRadius: 10, color: "#818cf8", fontSize: 11 }}>
+                Reading your file...
+              </div>
+            )}
+            {cvFile && !extracting && (
               <div style={{ marginBottom: 9, padding: "7px 13px", background: "rgba(99,102,241,.07)", border: "1px solid rgba(99,102,241,.2)", borderRadius: 10, color: "#818cf8", fontSize: 11, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span>📎 {cvFile.name}</span>
                 <button onClick={() => setCvFile(null)} style={{ background: "none", border: "none", color: "#ef4444", fontSize: 13, cursor: "pointer" }}>✕</button>
               </div>
             )}
             <div style={{ display: "flex", gap: 9, alignItems: "flex-end" }}>
-              <input ref={fileRef} type="file" accept=".pdf,.txt" onChange={handleFileUpload} style={{ display: "none" }} />
-              <button className="btn" onClick={() => fileRef.current?.click()}
-                style={{ width: 44, height: 44, borderRadius: 13, flexShrink: 0, background: "rgba(99,102,241,.08)", border: "1px solid rgba(99,102,241,.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".pdf,.txt"
+                onChange={handleFileUpload}
+                style={{ position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap", border: 0 }}
+              />
+              <button className="btn" onClick={() => fileRef.current?.click()} disabled={extracting}
+                style={{ width: 44, height: 44, borderRadius: 13, flexShrink: 0, background: "rgba(99,102,241,.08)", border: "1px solid rgba(99,102,241,.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, opacity: extracting ? 0.5 : 1 }}>
                 📎
               </button>
               <textarea
@@ -572,4 +610,5 @@ export default function LifePath() {
       )}
     </div>
   );
-                           }
+}
+
