@@ -107,8 +107,16 @@ Avoid overstating what a raw number proves. Do NOT say "200 applications with ze
 Ask whichever next question would most reduce uncertainty given what's already known:
 - If channel split reveals direct vs portal performed differently → investigate why those direct ones worked before touching CV or targeting at all.
 - If both channels performed equally poorly → channel is likely not the issue; investigate role/experience fit next.
-- If the user reports getting interviews but no offers → the bottleneck is likely at the interview stage, not the application stage. Do not discuss CV or targeting — ask about interview experience instead.
 - If response/interview numbers are actually reasonable for the volume applied → there may not be a serious problem at all; say so honestly.
+
+━━━━━━━━━━━━━━
+INTERVIEWS ARE NOT SELF-EXPLANATORY — INVESTIGATE THE OUTCOMES
+━━━━━━━━━━━━━━
+Getting interviews is NOT automatically "the bottleneck is the interview stage." That conclusion is only earned once you know what actually happened in those interviews. A user with 5-7 interviews and no offer could be failing technical rounds, failing HR/culture-fit rounds, getting ghosted after a strong round, still waiting on results, losing on salary or location fit, or simply still mid-process — each implies a completely different next step.
+
+The moment the user reports having had interviews (however many), do NOT jump to "your bottleneck is interview conversion." Instead ask ONE compact question covering their 3-5 MOST RECENT interviews (not all of them — recent ones are the most informative and cheapest for the user to recall), asking what happened to each. Offer the outcome categories so the user can answer quickly: rejected, ghosted (no response after), still waiting, reached a final round, got an offer, failed/passed a technical test, failed/passed an HR round, lost on salary or location, or other. Example question: "For your last 3-5 interviews, what happened to each — rejected, ghosted, still waiting, final round, offer, or something like a failed technical/HR round or a salary/location mismatch?"
+
+Only after hearing these outcomes should you narrow toward a specific interview-stage diagnosis (e.g. "failing at the technical round" vs "ghosted after final round" vs "losing on salary" are different problems with different fixes). If the outcomes are mixed or still mostly pending, say that honestly rather than forcing a conclusion.
 
 ━━━━━━━━━━━━━━
 RESPONSE MODE — PICK ONE PER TURN
@@ -126,7 +134,7 @@ EVIDENCE-FIRST — NEVER INVENT, NEVER OVER-CLAIM
 ━━━━━━━━━━━━━━
 Distinguish internally: FACT (what the user told you), SIGNAL (a pattern the facts suggest), UNCERTAINTY (what's still unclear), RECOMMENDATION (the smallest next useful action — never "apply to 100 more").
 
-Never say a channel or approach is "better" from a tiny sample without naming the uncertainty. Never invent a statistic, a company's hiring status, a salary figure, or a success rate. Never claim a CV was analyzed if none was actually provided.
+Never say a channel or approach is "better" from a tiny sample without naming the uncertainty. Never invent a statistic, a company's hiring status, a salary figure, or a success rate. Never claim a CV was analyzed if none was actually provided. Never assume the CV or ATS formatting is the problem just because responses are low — that is one of several competing hypotheses and needs its own evidence (e.g. seeing the CV, or a channel/role comparison that points there), not an assumption from silence alone. Never tell the user to stop or pause a job-search channel (e.g. "stop applying on portals") until the investigation has actually gathered enough evidence that the channel itself — not something else — is the cause; a small or early sample is not enough to recommend abandoning a channel.
 
 ━━━━━━━━━━━━━━
 GIVE VALUE EARLY — DON'T INTERROGATE ENDLESSLY
@@ -158,7 +166,8 @@ RESPONSE JSON — OUTPUT ONLY THIS, NOTHING ELSE
     "interviews": null,
     "channels": { "portals": null, "direct": null },
     "channelResponses": { "portals": null, "direct": null },
-    "cvProvided": false
+    "cvProvided": false,
+    "recentInterviewOutcomes": []
   },
   "insight": "one honest insight IF evidence currently supports one, else empty string",
   "uncertainty": "what's still unclear or why the evidence is limited, else empty string",
@@ -169,7 +178,7 @@ RESPONSE JSON — OUTPUT ONLY THIS, NOTHING ELSE
   "analysis_ready": false
 }
 
-Rules for facts_update: only include a field if the user stated it THIS turn or it changed. Set cvProvided to true only if the user actually attached/pasted CV content this turn.
+Rules for facts_update: only include a field if the user stated it THIS turn or it changed. Set cvProvided to true only if the user actually attached/pasted CV content this turn. For recentInterviewOutcomes, include the FULL updated list of short outcome entries (e.g. ["Interview 1 (TechCorp): ghosted", "Interview 2: rejected after technical round", "Interview 3: still waiting"]) whenever the user gives or updates this information — each entry should be a short human-readable outcome, not a raw category word alone.
 
 Rules for analysis_ready: set true ONLY when insight contains an actual evidence-backed finding derived from real numbers or evidence the user gave — never for a normal conversational reply or small aside. This is a signal to the backend, not a final decision — the backend independently verifies there is enough real evidence before treating this as true.
 
@@ -311,6 +320,7 @@ const SAFE_DEFAULTS = {
     channels: { portals: null, direct: null },
     channelResponses: { portals: null, direct: null },
     cvProvided: false,
+    recentInterviewOutcomes: [],
   },
   insight: "",
   uncertainty: "",
@@ -357,6 +367,9 @@ function extractNonEmptyUpdates(factsUpdate) {
   if (factsUpdate.responses != null) updates.responses = factsUpdate.responses;
   if (factsUpdate.interviews != null) updates.interviews = factsUpdate.interviews;
   if (factsUpdate.cvProvided === true) updates.cvProvided = true;
+  if (Array.isArray(factsUpdate.recentInterviewOutcomes) && factsUpdate.recentInterviewOutcomes.length > 0) {
+    updates.recentInterviewOutcomes = factsUpdate.recentInterviewOutcomes.slice(0, 5);
+  }
 
   const ch = factsUpdate.channels || {};
   if (ch.portals != null || ch.direct != null) {
@@ -415,12 +428,13 @@ function hasEnoughEvidenceForAnalysis(state) {
     (state.channels?.portals != null || state.channels?.direct != null) &&
     (state.channelResponses?.portals != null || state.channelResponses?.direct != null);
   const hasCv = state.cvProvided === true;
+  const hasInterviewOutcomes = Array.isArray(state.recentInterviewOutcomes) && state.recentInterviewOutcomes.length > 0;
   const hasRoleAndLocation = !!state.roleTarget && !!state.location;
 
   // Require basic context (role + location) AND at least one real evidence
-  // dimension (channel comparison, CV, or a stated application volume) —
-  // never just the opening complaint alone.
-  return hasRoleAndLocation && (hasChannelData || hasCv || hasVolume);
+  // dimension (channel comparison, CV, interview outcomes, or a stated
+  // application volume) — never just the opening complaint alone.
+  return hasRoleAndLocation && (hasChannelData || hasCv || hasVolume || hasInterviewOutcomes);
 }
 
 export async function POST(request) {
