@@ -92,7 +92,7 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbE
 
         {hasVerifiedNumbers && (
           <div style={{ padding: "12px 16px", background: "rgba(16,185,129,.04)", borderTop: "1px solid rgba(255,255,255,.04)" }}>
-            <div style={{ color: "#10b981", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 6 }}>✅ VERIFIED FROM YOUR NUMBERS</div>
+            <div style={{ color: "#10b981", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 6 }}>📊 FROM THE NUMBERS YOU GAVE</div>
             {data.verified_stats.portalRate != null && (
               <div style={{ color: "#94a3b8", fontSize: 12, marginBottom: 3 }}>
                 Portal: {data.verified_stats.portalRate}% response ({data.verified_stats.portalResponses}/{data.verified_stats.portalApplications})
