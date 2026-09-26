@@ -112,9 +112,10 @@ export default function AdminFeedbackPage() {
                 <thead>
                   <tr style={{ background: "rgba(255,255,255,.03)", borderBottom: "1px solid rgba(255,255,255,.08)" }}>
                     <th style={{ padding: "12px 14px", textAlign: "left", color: "#94a3b8", fontWeight: 600 }}>Date</th>
+                    <th style={{ padding: "12px 14px", textAlign: "left", color: "#94a3b8", fontWeight: 600 }}>Type</th>
                     <th style={{ padding: "12px 14px", textAlign: "left", color: "#94a3b8", fontWeight: 600 }}>Pillar</th>
                     <th style={{ padding: "12px 14px", textAlign: "left", color: "#94a3b8", fontWeight: 600 }}>Rating</th>
-                    <th style={{ padding: "12px 14px", textAlign: "left", color: "#94a3b8", fontWeight: 600 }}>Reason</th>
+                    <th style={{ padding: "12px 14px", textAlign: "left", color: "#94a3b8", fontWeight: 600 }}>Reason / Correction</th>
                     <th style={{ padding: "12px 14px", textAlign: "left", color: "#94a3b8", fontWeight: 600 }}>User ID</th>
                   </tr>
                 </thead>
@@ -122,6 +123,7 @@ export default function AdminFeedbackPage() {
                   {filtered.map((row, i) => (
                     <tr key={row.id} style={{ borderBottom: "1px solid rgba(255,255,255,.04)", background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,.01)" }}>
                       <td style={{ padding: "11px 14px", color: "#94a3b8", whiteSpace: "nowrap" }}>{formatDate(row.timestamp)}</td>
+                      <td style={{ padding: "11px 14px", color: "#64748b", fontSize: 11 }}>{row.feedbackType || "—"}</td>
                       <td style={{ padding: "11px 14px" }}>
                         <span style={{ background: "rgba(99,102,241,.1)", color: "#818cf8", padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600 }}>
                           {row.pillar || "—"}
@@ -134,7 +136,12 @@ export default function AdminFeedbackPage() {
                           <span style={{ color: "#ef4444", fontWeight: 700 }}>👎 Negative</span>
                         )}
                       </td>
-                      <td style={{ padding: "11px 14px", color: "#94a3b8" }}>{row.reason || "—"}</td>
+                      <td style={{ padding: "11px 14px", color: "#94a3b8", maxWidth: 280 }}>
+                        {row.reason || "—"}
+                        {row.correction && (
+                          <div style={{ color: "#64748b", fontSize: 11, marginTop: 4, fontStyle: "italic" }}>"{row.correction}"</div>
+                        )}
+                      </td>
                       <td style={{ padding: "11px 14px", color: "#475569", fontSize: 10, fontFamily: "monospace" }}>{row.userId || "—"}</td>
                     </tr>
                   ))}
