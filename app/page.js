@@ -115,7 +115,7 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbE
   const feedbackMode = data.feedback_mode || (data.analysis_ready === true ? "diagnosis" : "none");
   const isDiagnosis = feedbackMode === "diagnosis" && !!diagnosis?.bottleneck;
   const isSignal = feedbackMode === "signal" && !isDiagnosis;
-  const hasVerifiedNumbers = data.verified_stats && (data.verified_stats.portalRate != null || data.verified_stats.directRate != null);
+  const hasVerifiedNumbers = data.verified_stats && (data.verified_stats.portalRate != null || data.verified_stats.directRate != null || data.verified_stats.sampleSize);
 
   const submitDiagnosisPositive = () => {
     onFeedback?.({
@@ -161,13 +161,13 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbE
               <span style={{ color: "#818cf8", fontSize: 9, fontWeight: 700, letterSpacing: 2 }}>
                 {isDiagnosis ? "WHAT WE FOUND" : isSignal ? "🔎 JOB SEARCH SIGNAL" : "🔍 SIGNAL FOUND"}
               </span>
-              {data.verified_stats?.evidenceStrength && (
-                <span title="Reflects how much data we have, not certainty about the cause" style={{
+              {isSignal && data.leadingHypothesis?.confidence && (
+                <span title={`Confidence in the specific idea being discussed ("${data.leadingHypothesis.label}") — not proof, and not based on how much data we have`} style={{
                   fontSize: 9, fontWeight: 800, letterSpacing: 1, padding: "3px 8px", borderRadius: 100,
-                  color: data.verified_stats.evidenceStrength === "Low" ? "#f59e0b" : data.verified_stats.evidenceStrength === "Medium" ? "#818cf8" : "#10b981",
-                  background: data.verified_stats.evidenceStrength === "Low" ? "rgba(245,158,11,.1)" : data.verified_stats.evidenceStrength === "Medium" ? "rgba(99,102,241,.1)" : "rgba(16,185,129,.1)",
+                  color: data.leadingHypothesis.confidence === "low" ? "#f59e0b" : data.leadingHypothesis.confidence === "medium" ? "#818cf8" : "#10b981",
+                  background: data.leadingHypothesis.confidence === "low" ? "rgba(245,158,11,.1)" : data.leadingHypothesis.confidence === "medium" ? "rgba(99,102,241,.1)" : "rgba(16,185,129,.1)",
                 }}>
-                  EVIDENCE: {data.verified_stats.evidenceStrength?.toUpperCase()}
+                  HYPOTHESIS CONFIDENCE: {data.leadingHypothesis.confidence?.toUpperCase()}
                 </span>
               )}
             </div>
@@ -219,6 +219,11 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbE
             {data.verified_stats.directRate != null && (
               <div style={{ color: "#94a3b8", fontSize: 12 }}>
                 Direct: {data.verified_stats.directRate}% response ({data.verified_stats.directResponses}/{data.verified_stats.directApplications})
+              </div>
+            )}
+            {data.verified_stats.sampleSize && (
+              <div title="How much application volume we have — not a judgment about any specific cause" style={{ color: "#475569", fontSize: 11, marginTop: 6, fontStyle: "italic" }}>
+                Sample size so far: {data.verified_stats.sampleSize}
               </div>
             )}
           </div>
