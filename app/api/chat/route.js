@@ -192,6 +192,8 @@ Distinguish internally: FACT (what the user told you), SIGNAL (a pattern the fac
 
 Never say a channel or approach is "better" from a tiny sample without naming the uncertainty. Never invent a statistic, a company's hiring status, a salary figure, or a success rate. Never claim a CV was analyzed if none was actually provided. Never assume the CV or ATS formatting is the problem just because responses are low — that is one of several competing hypotheses and needs its own evidence (e.g. seeing the CV, or a channel/role comparison that points there), not an assumption from silence alone. Never tell the user to stop or pause a job-search channel (e.g. "stop applying on portals") until the investigation has actually gathered enough evidence that the channel itself — not something else — is the cause; a small or early sample is not enough to recommend abandoning a channel.
 
+Never assert a claim about the job market itself — how many openings a location has, how competitive a role is, whether a number of postings is "too high" for a market, typical hiring practice in an industry — as an established fact. You have no real data on any specific local market. Phrase this kind of thing as a question to the user or an explicit, hedged possibility ("it's possible the market for this role in this location is small — does that match what you're seeing?"), never as a stated premise your reasoning then builds on. A "signal" is not a finding: while feedback_mode is "signal", the insight/reply text must read as an open hypothesis using hedge language (possible, might, could point to, worth checking) — reserve confident, declarative language for an actually earned "diagnosis".
+
 ━━━━━━━━━━━━━━
 GIVE VALUE EARLY — DON'T INTERROGATE ENDLESSLY
 ━━━━━━━━━━━━━━
@@ -596,14 +598,44 @@ function computeVerifiedStats(state) {
   return Object.keys(stats).length > 0 ? stats : null;
 }
 
-// Evidence strength reflects sample size only — how much data we have,
-// not whether a specific diagnosis is correct.
-function computeEvidenceStrength(state) {
+// Purely a volume label — "how much application data do we have," never a
+// judgment about whether any particular hypothesis is correct. Kept
+// deliberately separate from hypothesis confidence so the two can never be
+// conflated in the UI again (that conflation was the exact bug: a permanent
+// "EVIDENCE: HIGH" badge that outlived whatever specific claim it was
+// attached to).
+function computeSampleSize(state) {
   const total = state.applicationsTotal;
   if (total == null) return null;
   if (total < 15) return "Low";
   if (total < 50) return "Medium";
   return "High";
+}
+
+// The one thing that's actually allowed to look like "we're onto
+// something": pick the single strongest currently-tracked hypothesis (by
+// status, then confidence) so the UI can show confidence in THAT specific
+// claim — never a generic, volume-derived number.
+const HYPOTHESIS_STATUS_RANK = { untested: 0, investigating: 1, weak: 1, plausible: 2, supported: 3, confirmed: 4 };
+const HYPOTHESIS_CONFIDENCE_RANK = { low: 0, medium: 1, high: 2 };
+function leadingHypothesis(hypotheses) {
+  if (!Array.isArray(hypotheses) || hypotheses.length === 0) return null;
+  let best = null;
+  for (const h of hypotheses) {
+    if (!h?.label) continue;
+    if (!best) { best = h; continue; }
+    const statusDelta = (HYPOTHESIS_STATUS_RANK[h.status] ?? 0) - (HYPOTHESIS_STATUS_RANK[best.status] ?? 0);
+    if (statusDelta > 0) { best = h; continue; }
+    if (statusDelta === 0 && (HYPOTHESIS_CONFIDENCE_RANK[h.confidence] ?? 0) > (HYPOTHESIS_CONFIDENCE_RANK[best.confidence] ?? 0)) {
+      best = h;
+    }
+  }
+  if (!best) return null;
+  // A hypothesis that's still merely "untested" isn't worth surfacing as a
+  // confidence badge at all — that would just recreate the same bug in a
+  // new shape.
+  if (best.status === "untested") return null;
+  return { label: best.label, status: best.status, confidence: best.confidence };
 }
 
 // Server-side gate: never trust the model's own feedback_mode/diagnosis blindly.
@@ -796,11 +828,11 @@ export async function POST(request) {
         }
 
         verifiedStats = computeVerifiedStats(searchState);
-        const evidenceStrength = computeEvidenceStrength(searchState);
+        const sampleSize = computeSampleSize(searchState);
         if (verifiedStats) {
-          verifiedStats.evidenceStrength = evidenceStrength;
-        } else if (evidenceStrength) {
-          verifiedStats = { evidenceStrength };
+          verifiedStats.sampleSize = sampleSize;
+        } else if (sampleSize) {
+          verifiedStats = { sampleSize };
         }
 
         // Persist hypothesis tracking regardless of feedback_mode, so the
@@ -809,6 +841,11 @@ export async function POST(request) {
         if (Array.isArray(structured.hypotheses) && structured.hypotheses.length > 0) {
           searchState = await updateSearchState(userId, { hypotheses: structured.hypotheses });
         }
+
+        // Confidence shown to the user must track a SPECIFIC hypothesis,
+        // never application volume — computed fresh from whatever is
+        // actually persisted right now, not cached from an earlier turn.
+        structured = { ...structured, leadingHypothesis: leadingHypothesis(searchState.hypotheses) };
 
         // Server-side gate — never trust the model's own feedback_mode or
         // diagnosis claim blindly. This can only ever downgrade, never upgrade.
@@ -847,6 +884,7 @@ export async function POST(request) {
         ...structured,
         feedback_mode: "none",
         diagnosis: { bottleneck: "", confidence: "low", reasoning: [] },
+        leadingHypothesis: null,
       };
     }
 
