@@ -253,7 +253,7 @@ RESPONSE JSON — OUTPUT ONLY THIS, NOTHING ELSE
 
 Rules for facts_update: only include a field if the user stated it THIS turn or it changed. Set cvProvided to true only if the user actually attached/pasted CV content this turn. For recentInterviewOutcomes, include the FULL updated list of short outcome entries (e.g. ["Interview 1 (TechCorp): ghosted", "Interview 2: rejected after technical round", "Interview 3: still waiting"]) whenever the user gives or updates this information — each entry should be a short human-readable outcome, not a raw category word alone.
 
-Rules for hypotheses: once any hypothesis exists, output the FULL current array every turn (carry forward ones from JOB SEARCH STATE, update their status/confidence/evidence fields in light of this turn, never silently drop one). Leave the array empty ONLY before any hypothesis is worth naming yet.
+Rules for hypotheses: keep at most 3 hypotheses active at once — the ones actually worth tracking, not every conceivable one. Once any hypothesis exists, output the FULL current array every turn (carry forward ones from JOB SEARCH STATE, update their status/confidence/evidence fields in light of this turn, never silently drop one). Leave the array empty ONLY before any hypothesis is worth naming yet. Keep each evidence field (supportingEvidence/contradictingEvidence/missingEvidence) to one short sentence or leave it empty — do not pad these.
 
 Rules for diagnosis: leave bottleneck as "" unless it is genuinely earned (see THE HARD REASONING MODEL above). "reasoning" is a short array of specific evidence bullets for that diagnosis — not generic restatement of the signal.
 
@@ -298,7 +298,7 @@ const callGemini = async (systemPrompt, messages) => {
             role: m.role === "assistant" ? "model" : "user",
             parts: [{ text: m.content }],
           })),
-          generationConfig: { maxOutputTokens: 1200, temperature: 0.7 },
+          generationConfig: { maxOutputTokens: 2600, temperature: 0.7 },
         }),
       }
     );
@@ -348,7 +348,7 @@ const callGroq = async (systemPrompt, messages) => {
             content: m.content,
           })),
         ],
-        max_tokens: 1200,
+        max_tokens: 2600,
         temperature: 0.7,
       }),
     });
@@ -381,17 +381,78 @@ const callGroq = async (systemPrompt, messages) => {
 };
 
 const parseJSON = (text) => {
+  const clean = text.replace(/```json|```/g, "").trim();
+
   try {
-    const clean = text.replace(/```json|```/g, "").trim();
     return JSON.parse(clean);
-  } catch {
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) {
-      try { return JSON.parse(match[0]); } catch {}
+  } catch {}
+
+  const match = clean.match(/\{[\s\S]*\}/);
+  if (match) {
+    try { return JSON.parse(match[0]); } catch {}
+  }
+
+  // Last resort: the response may have been cut off mid-JSON (e.g. hit a
+  // token limit). Walk the text tracking string/bracket state, truncate at
+  // the last structurally-safe point, and close any still-open
+  // braces/brackets so we can recover the partial object rather than
+  // failing the whole turn.
+  const repaired = repairTruncatedJSON(match ? match[0] : clean);
+  if (repaired) return repaired;
+
+  return null;
+};
+
+function repairTruncatedJSON(text) {
+  let s = text.trim();
+  const start = s.indexOf("{");
+  if (start === -1) return null;
+  s = s.slice(start);
+
+  let inString = false;
+  let escape = false;
+  let lastSafeIndex = -1;
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inString) {
+      if (escape) escape = false;
+      else if (ch === "\\") escape = true;
+      else if (ch === '"') inString = false;
+      continue;
     }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === "," || ch === "}" || ch === "]") lastSafeIndex = i;
+  }
+
+  if (lastSafeIndex === -1) return null;
+
+  let truncated = s.slice(0, lastSafeIndex + 1).replace(/,\s*$/, "");
+
+  const closeStack = [];
+  inString = false;
+  escape = false;
+  for (let i = 0; i < truncated.length; i++) {
+    const ch = truncated[i];
+    if (inString) {
+      if (escape) escape = false;
+      else if (ch === "\\") escape = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === "{") closeStack.push("}");
+    else if (ch === "[") closeStack.push("]");
+    else if (ch === "}" || ch === "]") closeStack.pop();
+  }
+
+  const candidate = truncated + closeStack.reverse().join("");
+  try {
+    return JSON.parse(candidate);
+  } catch {
     return null;
   }
-};
+}
 
 const SAFE_DEFAULTS = {
   reply: "",
@@ -418,7 +479,7 @@ const SAFE_DEFAULTS = {
 const VALID_HYPOTHESIS_STATUS = ["untested", "investigating", "weak", "plausible", "supported", "confirmed"];
 const VALID_CONFIDENCE = ["low", "medium", "high"];
 const VALID_FEEDBACK_MODE = ["none", "signal", "diagnosis"];
-const MAX_HYPOTHESES = 6;
+const MAX_HYPOTHESES = 4;
 
 // Clamp one model-supplied hypothesis object down to a safe, well-typed shape.
 // Never trust the model's status/confidence strings blindly — fall back to
