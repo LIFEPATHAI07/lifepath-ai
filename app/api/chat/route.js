@@ -110,13 +110,69 @@ Ask whichever next question would most reduce uncertainty given what's already k
 - If response/interview numbers are actually reasonable for the volume applied → there may not be a serious problem at all; say so honestly.
 
 ━━━━━━━━━━━━━━
-INTERVIEWS ARE NOT SELF-EXPLANATORY — INVESTIGATE THE OUTCOMES
+THE HARD REASONING MODEL — FACT → SIGNAL → HYPOTHESIS → INVESTIGATION → EVIDENCE → CONFIDENCE → DIAGNOSIS → ACTION
 ━━━━━━━━━━━━━━
-Getting interviews is NOT automatically "the bottleneck is the interview stage." That conclusion is only earned once you know what actually happened in those interviews. A user with 5-7 interviews and no offer could be failing technical rounds, failing HR/culture-fit rounds, getting ghosted after a strong round, still waiting on results, losing on salary or location fit, or simply still mid-process — each implies a completely different next step.
+This is not prose styling — it is the actual order you must reason in, every turn. The chat is only the interface; the "hypotheses" and "diagnosis" fields you output ARE the intelligence layer, and they persist across turns via JOB SEARCH STATE. Never skip a stage.
 
-The moment the user reports having had interviews (however many), do NOT jump to "your bottleneck is interview conversion." Instead ask ONE compact question covering their 3-5 MOST RECENT interviews (not all of them — recent ones are the most informative and cheapest for the user to recall), asking what happened to each. Offer the outcome categories so the user can answer quickly: rejected, ghosted (no response after), still waiting, reached a final round, got an offer, failed/passed a technical test, failed/passed an HR round, lost on salary or location, or other. Example question: "For your last 3-5 interviews, what happened to each — rejected, ghosted, still waiting, final round, offer, or something like a failed technical/HR round or a salary/location mismatch?"
+1. FACT — only what the user actually told you or what real evidence (CV, job descriptions) showed. Store in facts_update.
+2. SIGNAL — a mathematically/logically observable pattern in the facts that does NOT yet explain causality. E.g. "0 offers from 6 reported interviews" or "500 applications, ~2% response." A signal is not a cause.
+3. HYPOTHESIS — a possible explanation for the signal. Several can coexist. Track each as an object: { id, label, status, confidence, supportingEvidence, contradictingEvidence, missingEvidence }.
+   - status: "untested" | "investigating" | "weak" | "plausible" | "supported" | "confirmed"
+   - confidence: "low" | "medium" | "high"
+   - Never set status "confirmed" unless the evidence genuinely, specifically supports it — not merely because nothing has disproven it yet.
+4. INVESTIGATION — figure out what evidence would actually distinguish between the live hypotheses, and ask for (or infer) exactly that — nothing more, nothing padded.
+5. EVIDENCE — only real evidence (what the user reported, what a CV/job-description comparison actually showed) can move a hypothesis forward. Confidence must be proportional to the quality, relevance and completeness of that evidence — never to sample size alone.
+6. CONFIDENCE — update every live hypothesis's confidence and status each turn based on what changed. New evidence must be allowed to LOWER a hypothesis's confidence, not just raise it. Do not defend a hypothesis just because you stated it earlier — if disconfirming evidence shows up, say so plainly and downgrade it.
+7. DIAGNOSIS — only fill in the "diagnosis" field (bottleneck + confidence + reasoning bullets) once ALL of these are true: (a) at least one hypothesis has reached status "supported" or "confirmed" on its own specific merits, (b) the other live hypotheses have actually been investigated and are now weaker by comparison — not simply unexamined, (c) the reasoning you'd give is about that specific hypothesis's evidence, not "it's the last stage with a bad number." If any of this isn't true yet, leave "diagnosis" completely empty (bottleneck: "") — it is always fine, and often correct, to say "we don't have enough evidence to determine the bottleneck yet."
+8. ACTION — only once a diagnosis is genuinely earned, recommend the smallest next action tied specifically to that diagnosis.
 
-Only after hearing these outcomes should you narrow toward a specific interview-stage diagnosis (e.g. "failing at the technical round" vs "ghosted after final round" vs "losing on salary" are different problems with different fixes). If the outcomes are mixed or still mostly pending, say that honestly rather than forcing a conclusion.
+HYPOTHESIS BOOKKEEPING: once hypotheses exist, output the FULL current list every turn (not just the ones that changed), carrying forward every hypothesis already named in JOB SEARCH STATE — never silently drop one. Update statuses/confidence in light of this turn's new facts. Only retire a hypothesis when it is genuinely disproven, not merely unexamined.
+
+━━━━━━━━━━━━━━
+ABSOLUTE RULES (hard constraints, not suggestions)
+━━━━━━━━━━━━━━
+- Never label something "the bottleneck" just because it is the latest funnel stage with a poor conversion number.
+- "0 offers from N interviews" is a SIGNAL, not an automatic interview-stage bottleneck.
+- "N applications, ~0 responses" is a SIGNAL, not an automatic CV bottleneck.
+- Never diagnose a CV problem without having actually seen the CV.
+- Never claim an ATS/keyword mismatch without comparing the actual CV against representative job descriptions the user provided.
+- Never call evidence strength "high" merely because the sample size is large — quality, relevance, completeness, and whether alternative explanations were investigated all matter more than volume.
+- Never infer causality from correlation alone.
+- "Same CV for every application" is a FACT worth investigating, not evidence the CV is bad.
+- "0 offers" is an OUTCOME requiring investigation, not evidence that interview performance was bad.
+- "Another candidate was selected" is NOT evidence the user's interview performance was poor — it's largely uninformative about the user specifically; treat it as such.
+- "Company ghosted after the interview" is NOT evidence the user failed — the outcome is UNKNOWN, not a rejection. Never convert an unknown outcome into an assumed rejection.
+- Do not defend a previously stated hypothesis or diagnosis just because you said it earlier in the conversation — actively look for evidence that would weaken it.
+- If evidence genuinely is insufficient, say so directly: "We don't have enough evidence to determine the bottleneck yet." That is a completely acceptable answer — do not manufacture certainty to feel satisfying.
+
+━━━━━━━━━━━━━━
+THE FUNNEL — DO NOT COLLAPSE STAGES
+━━━━━━━━━━━━━━
+Applications → Contacts/Responses → Interviews → Technical/HR/Final rounds → Offers → Accepted/Rejected/Unknown.
+Interview outcomes you should recognize as DIFFERENT evidence, not one undifferentiated "rejected" bucket: technical rejection, HR rejection, final-round rejection, another candidate selected, salary mismatch, user withdrew, company cancelled, ghosted/unknown, still pending, offer, accepted.
+
+The moment the user reports having had interviews (however many), do NOT jump to "your bottleneck is interview conversion." Ask ONE compact question covering their 3-5 MOST RECENT interviews (recent ones are cheapest to recall and most informative) — what happened to each. Offer the categories so they can answer fast: rejected, ghosted, still waiting, final round, offer, technical test (pass/fail), HR round (pass/fail), salary/location mismatch, other. Map each outcome to the hypothesis it actually informs: a technical rejection is evidence for a technical-performance hypothesis; an HR rejection is evidence for a communication/fit hypothesis; "selected another candidate" or "ghosted" barely move any hypothesis at all — say so rather than treating them as proof of a weakness. Only narrow toward a specific interview-stage diagnosis once the outcomes actually point somewhere specific; if they're mixed or mostly unknown/pending, say that honestly.
+
+━━━━━━━━━━━━━━
+CV — ONLY REASON ABOUT WHAT YOU'VE ACTUALLY SEEN
+━━━━━━━━━━━━━━
+Before the CV is uploaded, a CV-fit hypothesis can exist and be discussed as a hypothesis, but never as a finding. Only once the user has actually attached/pasted CV content may you analyze the CV itself. Only once representative job descriptions are also available may you make specific CV-to-job or keyword claims. "I use the same CV for every application" is a fact worth investigating, never a stated conclusion.
+
+━━━━━━━━━━━━━━
+SAMPLE SIZE ≠ CERTAINTY
+━━━━━━━━━━━━━━
+A large number attached to a poor outcome (500 applications with almost no response; 6 interviews with 0 offers) justifies "this is worth investigating further." It does NOT by itself justify naming that stage the bottleneck. Confidence comes from the specificity and relevance of the evidence gathered about WHY, not from how big the denominator is.
+
+━━━━━━━━━━━━━━
+STATE CONSISTENCY — NEWER, MORE SPECIFIC FACTS WIN
+━━━━━━━━━━━━━━
+The user's opening phrasing (e.g. "nobody is responding") is a first impression, not a permanent fact. Once more specific numbers arrive later (e.g. "actually about 10 companies contacted me"), treat the newer figures as authoritative for your reasoning and your reply — do not keep leaning on the earlier vague wording as if it still holds. JOB SEARCH STATE always reflects the latest known values; reason from that, not from what was said several turns ago.
+
+━━━━━━━━━━━━━━
+RESPONSE LANGUAGE
+━━━━━━━━━━━━━━
+Prefer: "interesting signal", "worth investigating", "we don't know yet", "possible explanation", "the evidence is limited so far", "this hypothesis is looking less likely", "this hypothesis has real evidence behind it now".
+Avoid (unless the evidence threshold above is genuinely met): "this is definitely the bottleneck", "we found the problem", "your CV is the problem", "your interviews are the problem".
 
 ━━━━━━━━━━━━━━
 RESPONSE MODE — PICK ONE PER TURN
@@ -124,10 +180,10 @@ RESPONSE MODE — PICK ONE PER TURN
 1. CLARIFY — you need one more piece of information before you can reason further.
 2. INVESTIGATE — you've spotted something worth checking, but haven't confirmed it.
 3. STATE UNCERTAINTY — be explicit that the evidence doesn't yet support a conclusion.
-4. DIAGNOSE — you have enough evidence to name a likely bottleneck, with its actual uncertainty stated.
+4. DIAGNOSE — you have genuinely earned a diagnosis per the model above; the "diagnosis" field is filled in and feedback_mode is "diagnosis".
 5. RECOMMEND — only after a diagnose step, suggest the smallest next action tied to that specific diagnosis.
 
-Do not skip straight to DIAGNOSE or RECOMMEND just because the conversation has gone on for a few turns — earn it with actual evidence first.
+Do not skip straight to DIAGNOSE or RECOMMEND just because the conversation has gone on for a few turns, or because a number looks bad, or because you already floated a hypothesis earlier — earn it with actual evidence first.
 
 ━━━━━━━━━━━━━━
 EVIDENCE-FIRST — NEVER INVENT, NEVER OVER-CLAIM
@@ -169,18 +225,43 @@ RESPONSE JSON — OUTPUT ONLY THIS, NOTHING ELSE
     "cvProvided": false,
     "recentInterviewOutcomes": []
   },
-  "insight": "one honest insight IF evidence currently supports one, else empty string",
+  "signal": "the raw, causally-neutral pattern you're currently looking at, e.g. '0 offers from 6 interviews reported so far' — empty string if there's no new signal this turn",
+  "hypotheses": [
+    {
+      "id": "short_snake_case_id",
+      "label": "short human label, e.g. 'Technical round performance'",
+      "status": "untested",
+      "confidence": "low",
+      "supportingEvidence": "",
+      "contradictingEvidence": "",
+      "missingEvidence": ""
+    }
+  ],
+  "insight": "one honest, evidence-scoped insight IF the evidence currently supports one, else empty string",
   "uncertainty": "what's still unclear or why the evidence is limited, else empty string",
+  "diagnosis": {
+    "bottleneck": "short label of the earned diagnosis — leave as empty string unless it is genuinely earned per the reasoning model above",
+    "confidence": "low",
+    "reasoning": []
+  },
   "recommended_action": "the smallest useful next step, else empty string",
   "next_question": "the single next question to ask, if still gathering, else empty string",
   "tip": "a short hint on HOW to answer well, only if useful, else empty string",
   "ready_to_investigate_deeper": false,
-  "analysis_ready": false
+  "feedback_mode": "none"
 }
 
 Rules for facts_update: only include a field if the user stated it THIS turn or it changed. Set cvProvided to true only if the user actually attached/pasted CV content this turn. For recentInterviewOutcomes, include the FULL updated list of short outcome entries (e.g. ["Interview 1 (TechCorp): ghosted", "Interview 2: rejected after technical round", "Interview 3: still waiting"]) whenever the user gives or updates this information — each entry should be a short human-readable outcome, not a raw category word alone.
 
-Rules for analysis_ready: set true ONLY when insight contains an actual evidence-backed finding derived from real numbers or evidence the user gave — never for a normal conversational reply or small aside. This is a signal to the backend, not a final decision — the backend independently verifies there is enough real evidence before treating this as true.
+Rules for hypotheses: once any hypothesis exists, output the FULL current array every turn (carry forward ones from JOB SEARCH STATE, update their status/confidence/evidence fields in light of this turn, never silently drop one). Leave the array empty ONLY before any hypothesis is worth naming yet.
+
+Rules for diagnosis: leave bottleneck as "" unless it is genuinely earned (see THE HARD REASONING MODEL above). "reasoning" is a short array of specific evidence bullets for that diagnosis — not generic restatement of the signal.
+
+Rules for feedback_mode — this is what the backend uses to decide what kind of feedback control (if any) to show the user, so answer honestly, not optimistically:
+- "none" — an ordinary clarifying/investigating turn. No meaningful signal or diagnosis this turn.
+- "signal" — you surfaced a genuine, evidence-based signal or partial insight (the "insight" or "signal" field is non-empty) but have NOT earned a full diagnosis yet.
+- "diagnosis" — you have genuinely earned a full diagnosis this turn per the reasoning model (the "diagnosis.bottleneck" field is filled in with real, specific reasoning).
+This is a signal to the backend, not a final decision — the backend independently re-verifies the evidence before honoring "diagnosis" or "signal".
 
 CRITICAL: Output ONLY the JSON object. Nothing before or after. No backticks. No markdown.`;
 
@@ -322,14 +403,53 @@ const SAFE_DEFAULTS = {
     cvProvided: false,
     recentInterviewOutcomes: [],
   },
+  signal: "",
+  hypotheses: [],
   insight: "",
   uncertainty: "",
+  diagnosis: { bottleneck: "", confidence: "low", reasoning: [] },
   recommended_action: "",
   next_question: "",
   tip: "",
   ready_to_investigate_deeper: false,
-  analysis_ready: false,
+  feedback_mode: "none",
 };
+
+const VALID_HYPOTHESIS_STATUS = ["untested", "investigating", "weak", "plausible", "supported", "confirmed"];
+const VALID_CONFIDENCE = ["low", "medium", "high"];
+const VALID_FEEDBACK_MODE = ["none", "signal", "diagnosis"];
+const MAX_HYPOTHESES = 6;
+
+// Clamp one model-supplied hypothesis object down to a safe, well-typed shape.
+// Never trust the model's status/confidence strings blindly — fall back to
+// conservative defaults ("untested" / "low") on anything unrecognized.
+function sanitizeHypothesis(h, i) {
+  if (!h || typeof h !== "object") return null;
+  const id = typeof h.id === "string" && h.id.trim() ? h.id.trim().slice(0, 40) : `hypothesis_${i}`;
+  const label = typeof h.label === "string" ? h.label.slice(0, 120) : "";
+  if (!label) return null;
+  const status = VALID_HYPOTHESIS_STATUS.includes(h.status) ? h.status : "untested";
+  const confidence = VALID_CONFIDENCE.includes(h.confidence) ? h.confidence : "low";
+  return {
+    id,
+    label,
+    status,
+    confidence,
+    supportingEvidence: typeof h.supportingEvidence === "string" ? h.supportingEvidence.slice(0, 300) : "",
+    contradictingEvidence: typeof h.contradictingEvidence === "string" ? h.contradictingEvidence.slice(0, 300) : "",
+    missingEvidence: typeof h.missingEvidence === "string" ? h.missingEvidence.slice(0, 300) : "",
+  };
+}
+
+function sanitizeDiagnosis(d) {
+  if (!d || typeof d !== "object") return { bottleneck: "", confidence: "low", reasoning: [] };
+  const bottleneck = typeof d.bottleneck === "string" ? d.bottleneck.slice(0, 160) : "";
+  const confidence = VALID_CONFIDENCE.includes(d.confidence) ? d.confidence : "low";
+  const reasoning = Array.isArray(d.reasoning)
+    ? d.reasoning.filter((r) => typeof r === "string" && r.trim()).slice(0, 6).map((r) => r.slice(0, 220))
+    : [];
+  return { bottleneck, confidence, reasoning };
+}
 
 const sanitizeStructured = (parsed) => {
   if (!parsed || typeof parsed !== "object") return null;
@@ -340,6 +460,14 @@ const sanitizeStructured = (parsed) => {
   };
   merged.facts_update.channels = { ...SAFE_DEFAULTS.facts_update.channels, ...(parsed.facts_update?.channels || {}) };
   merged.facts_update.channelResponses = { ...SAFE_DEFAULTS.facts_update.channelResponses, ...(parsed.facts_update?.channelResponses || {}) };
+
+  merged.hypotheses = Array.isArray(parsed.hypotheses)
+    ? parsed.hypotheses.map(sanitizeHypothesis).filter(Boolean).slice(0, MAX_HYPOTHESES)
+    : [];
+  merged.diagnosis = sanitizeDiagnosis(parsed.diagnosis);
+  merged.signal = typeof parsed.signal === "string" ? parsed.signal.slice(0, 300) : "";
+  merged.feedback_mode = VALID_FEEDBACK_MODE.includes(parsed.feedback_mode) ? parsed.feedback_mode : "none";
+
   return merged;
 };
 
@@ -417,10 +545,11 @@ function computeEvidenceStrength(state) {
   return "High";
 }
 
-// Server-side gate: never trust the model's own analysis_ready blindly.
+// Server-side gate: never trust the model's own feedback_mode/diagnosis blindly.
 // Require real evidence — some combination of application volume, channel
-// data, or CV/job evidence — before allowing analysis mode to render.
-function hasEnoughEvidenceForAnalysis(state) {
+// data, CV evidence, or a genuinely sufficient set of known interview
+// outcomes — before a "diagnosis" is allowed to render at all.
+function computeDiagnosisEligibility(state) {
   if (!state) return false;
 
   const hasVolume = state.applicationsTotal != null && state.applicationsTotal > 0;
@@ -428,13 +557,47 @@ function hasEnoughEvidenceForAnalysis(state) {
     (state.channels?.portals != null || state.channels?.direct != null) &&
     (state.channelResponses?.portals != null || state.channelResponses?.direct != null);
   const hasCv = state.cvProvided === true;
-  const hasInterviewOutcomes = Array.isArray(state.recentInterviewOutcomes) && state.recentInterviewOutcomes.length > 0;
+  const interviewOutcomeCount = Array.isArray(state.recentInterviewOutcomes) ? state.recentInterviewOutcomes.length : 0;
+  // "0 offers from 6 interviews" alone is a SIGNAL, not enough for a
+  // diagnosis — require that at least a handful of the actual outcomes are
+  // known (technical rejection vs. ghosted vs. still-pending are very
+  // different evidence) before an interview-stage diagnosis is eligible.
+  const hasSufficientInterviewEvidence = interviewOutcomeCount >= 3;
   const hasRoleAndLocation = !!state.roleTarget && !!state.location;
 
-  // Require basic context (role + location) AND at least one real evidence
-  // dimension (channel comparison, CV, interview outcomes, or a stated
-  // application volume) — never just the opening complaint alone.
-  return hasRoleAndLocation && (hasChannelData || hasCv || hasVolume || hasInterviewOutcomes);
+  if (!hasRoleAndLocation) return false;
+
+  const hasBaseEvidence = hasChannelData || hasCv || hasVolume || hasSufficientInterviewEvidence;
+  if (!hasBaseEvidence) return false;
+
+  // Hard block: raw interview/offer counts with fewer than 3 known specific
+  // outcomes are never, on their own, enough to diagnose an interview-stage
+  // bottleneck — regardless of what the model claims.
+  const onlyRawInterviewSignal = state.interviews != null && state.interviews > 0 && !hasSufficientInterviewEvidence;
+  if (onlyRawInterviewSignal && !hasChannelData && !hasCv) return false;
+
+  return true;
+}
+
+// Backend, not the frontend, decides what feedback control (if any) renders.
+// The model's own feedback_mode is a claim, not a fact — downgrade it
+// whenever the server-verified state doesn't actually back it up.
+function computeFeedbackMode(structured, state) {
+  const claimed = structured.feedback_mode;
+
+  if (claimed === "diagnosis") {
+    const eligible = computeDiagnosisEligibility(state) && !!structured.diagnosis?.bottleneck;
+    if (eligible) return "diagnosis";
+    // Not earned yet — fall through to "signal" if there's at least a real
+    // insight/signal to show, otherwise "none".
+    return structured.insight || structured.signal ? "signal" : "none";
+  }
+
+  if (claimed === "signal") {
+    return structured.insight || structured.signal ? "signal" : "none";
+  }
+
+  return "none";
 }
 
 export async function POST(request) {
@@ -579,10 +742,31 @@ export async function POST(request) {
           verifiedStats = { evidenceStrength };
         }
 
-        // Server-side gate — never trust the model's analysis_ready alone.
-        if (structured.analysis_ready === true && !hasEnoughEvidenceForAnalysis(searchState)) {
-          console.log("[chat] analysis_ready downgraded — insufficient server-verified evidence", { userId });
-          structured = { ...structured, analysis_ready: false };
+        // Persist hypothesis tracking regardless of feedback_mode, so the
+        // reasoning state actually accumulates across turns (this is the
+        // "intelligence layer" — not just chat text).
+        if (Array.isArray(structured.hypotheses) && structured.hypotheses.length > 0) {
+          searchState = await updateSearchState(userId, { hypotheses: structured.hypotheses });
+        }
+
+        // Server-side gate — never trust the model's own feedback_mode or
+        // diagnosis claim blindly. This can only ever downgrade, never upgrade.
+        const finalFeedbackMode = computeFeedbackMode(structured, searchState);
+        if (finalFeedbackMode !== structured.feedback_mode) {
+          console.log("[chat] feedback_mode downgraded — insufficient server-verified evidence", {
+            userId, claimed: structured.feedback_mode, final: finalFeedbackMode,
+          });
+        }
+        structured = { ...structured, feedback_mode: finalFeedbackMode };
+
+        if (finalFeedbackMode === "diagnosis" && structured.diagnosis?.bottleneck) {
+          // Only an earned diagnosis is persisted as "the" diagnosis — this is
+          // what future turns see as "previously earned diagnosis" and are
+          // explicitly told they may revise or retract.
+          searchState = await updateSearchState(userId, { diagnosis: structured.diagnosis });
+        } else {
+          // Never let an unearned diagnosis object reach the client.
+          structured = { ...structured, diagnosis: { bottleneck: "", confidence: "low", reasoning: [] } };
         }
 
         if (structured.insight) {
@@ -595,10 +779,14 @@ export async function POST(request) {
       } catch (err) {
         console.error("[chat] search state update failed (non-fatal):", err?.message);
       }
-    } else if (structured.analysis_ready === true) {
+    } else {
       // No userId at all means no persisted evidence to verify against —
-      // never allow analysis mode without a verifiable state.
-      structured = { ...structured, analysis_ready: false };
+      // never allow signal/diagnosis feedback modes without a verifiable state.
+      structured = {
+        ...structured,
+        feedback_mode: "none",
+        diagnosis: { bottleneck: "", confidence: "low", reasoning: [] },
+      };
     }
 
     return NextResponse.json({
