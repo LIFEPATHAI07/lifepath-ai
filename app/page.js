@@ -9,14 +9,17 @@ const S = {
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
 
-const saveFeedback = async ({ rating, reason }) => {
+const saveFeedback = async ({ feedbackType = "signal", rating, reason = "", correction = "", snapshot = null }) => {
   try {
     const colRef = collection(db, "feedback");
     const docData = {
       userId: getUserId(),
       pillar: "diagnosis",
+      feedbackType,
       rating,
       reason: reason || "",
+      correction: correction || "",
+      snapshot: snapshot || null,
       timestamp: serverTimestamp(),
     };
     const docRef = await addDoc(colRef, docData);
@@ -42,23 +45,61 @@ const MessageBubbleUser = ({ content }) => (
   </div>
 );
 
+const DIAGNOSIS_REASONS = [
+  { id: "not_my_problem", label: "That's not my problem" },
+  { id: "misunderstood", label: "You misunderstood my situation" },
+  { id: "evidence_wrong", label: "The evidence is wrong" },
+  { id: "want_to_explain", label: "I want to explain what actually happened" },
+];
+
 const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbError }) => {
+  const [showReasons, setShowReasons] = useState(false);
+  const [selectedReason, setSelectedReason] = useState("");
+  const [correctionText, setCorrectionText] = useState("");
+
   if (!data) return null;
-  const { reply, insight, uncertainty, recommended_action, next_question, tip, ready_to_investigate_deeper } = data;
-  const isAnalysis = data.analysis_ready === true;
+  const { reply, insight, uncertainty, recommended_action, next_question, tip, ready_to_investigate_deeper, diagnosis } = data;
+
+  // feedback_mode is decided server-side, never guessed on the frontend from
+  // whether a response merely exists. Fall back to the old analysis_ready
+  // flag only for messages cached before this change.
+  const feedbackMode = data.feedback_mode || (data.analysis_ready === true ? "diagnosis" : "none");
+  const isDiagnosis = feedbackMode === "diagnosis" && !!diagnosis?.bottleneck;
+  const isSignal = feedbackMode === "signal" && !isDiagnosis;
   const hasVerifiedNumbers = data.verified_stats && (data.verified_stats.portalRate != null || data.verified_stats.directRate != null);
+
+  const submitDiagnosisPositive = () => {
+    onFeedback?.({
+      feedbackType: "diagnosis",
+      rating: "positive",
+      snapshot: { bottleneck: diagnosis?.bottleneck, confidence: diagnosis?.confidence },
+    });
+  };
+  const submitDiagnosisNegative = () => {
+    if (!selectedReason) return;
+    onFeedback?.({
+      feedbackType: "diagnosis",
+      rating: "negative",
+      reason: selectedReason,
+      correction: correctionText.trim(),
+      snapshot: { bottleneck: diagnosis?.bottleneck, confidence: diagnosis?.confidence },
+    });
+  };
+  const submitSignal = (rating) => {
+    onFeedback?.({ feedbackType: "signal", rating, snapshot: { signal: data.signal || insight } });
+  };
 
   return (
     <div style={{ marginBottom: 16, animation: "fadeUp .3s both" }}>
-      <div style={{ borderRadius: "4px 16px 16px 16px", overflow: "hidden", border: isAnalysis ? "1px solid rgba(99,102,241,.3)" : "1px solid rgba(99,102,241,.15)", background: "rgba(255,255,255,.02)" }}>
+      <div style={{ borderRadius: "4px 16px 16px 16px", overflow: "hidden", border: isDiagnosis ? "1px solid rgba(99,102,241,.3)" : "1px solid rgba(99,102,241,.15)", background: "rgba(255,255,255,.02)" }}>
 
-        {reply && !isAnalysis && (
+        {reply && !isDiagnosis && (
           <div style={{ padding: "14px 16px", color: "#e2e8f0", fontSize: 14, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
             {reply}
           </div>
         )}
 
-        {isAnalysis && (
+        {isDiagnosis && (
           <div style={{ padding: "14px 16px", background: "rgba(99,102,241,.05)", borderBottom: "1px solid rgba(255,255,255,.05)" }}>
             <div style={{ color: "#818cf8", fontSize: 10, fontWeight: 800, letterSpacing: 2, marginBottom: 8 }}>YOUR JOB SEARCH</div>
             {reply && <div style={{ color: "#94a3b8", fontSize: 12.5, lineHeight: 1.6 }}>{reply}</div>}
@@ -66,9 +107,11 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbE
         )}
 
         {insight && (
-          <div style={{ padding: "14px 16px", background: "rgba(99,102,241,.06)", borderTop: isAnalysis ? "none" : "1px solid rgba(255,255,255,.05)" }}>
+          <div style={{ padding: "14px 16px", background: "rgba(99,102,241,.06)", borderTop: isDiagnosis ? "none" : "1px solid rgba(255,255,255,.05)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 7 }}>
-              <span style={{ color: "#818cf8", fontSize: 9, fontWeight: 700, letterSpacing: 2 }}>{isAnalysis ? "WHAT WE FOUND" : "🔍 SIGNAL FOUND"}</span>
+              <span style={{ color: "#818cf8", fontSize: 9, fontWeight: 700, letterSpacing: 2 }}>
+                {isDiagnosis ? "WHAT WE FOUND" : isSignal ? "🔎 JOB SEARCH SIGNAL" : "🔍 SIGNAL FOUND"}
+              </span>
               {data.verified_stats?.evidenceStrength && (
                 <span title="Reflects how much data we have, not certainty about the cause" style={{
                   fontSize: 9, fontWeight: 800, letterSpacing: 1, padding: "3px 8px", borderRadius: 100,
@@ -83,9 +126,35 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbE
           </div>
         )}
 
+        {isDiagnosis && diagnosis?.bottleneck && (
+          <div style={{ padding: "14px 16px", background: "rgba(99,102,241,.04)", borderTop: "1px solid rgba(255,255,255,.04)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <span style={{ color: "#818cf8", fontSize: 9, fontWeight: 700, letterSpacing: 2 }}>🎯 YOUR JOB SEARCH DIAGNOSIS</span>
+              {diagnosis.confidence && (
+                <span title="How strong the evidence behind this specific diagnosis is" style={{
+                  fontSize: 9, fontWeight: 800, letterSpacing: 1, padding: "3px 8px", borderRadius: 100,
+                  color: diagnosis.confidence === "low" ? "#f59e0b" : diagnosis.confidence === "medium" ? "#818cf8" : "#10b981",
+                  background: diagnosis.confidence === "low" ? "rgba(245,158,11,.1)" : diagnosis.confidence === "medium" ? "rgba(99,102,241,.1)" : "rgba(16,185,129,.1)",
+                }}>
+                  CONFIDENCE: {diagnosis.confidence.toUpperCase()}
+                </span>
+              )}
+            </div>
+            <div style={{ color: "#e2e8f0", fontSize: 14, fontWeight: 700, marginBottom: 8 }}>{diagnosis.bottleneck}</div>
+            {Array.isArray(diagnosis.reasoning) && diagnosis.reasoning.length > 0 && (
+              <div>
+                <div style={{ color: "#64748b", fontSize: 10, fontWeight: 700, letterSpacing: 1, marginBottom: 5 }}>WHY WE THINK THIS</div>
+                <ul style={{ margin: 0, paddingLeft: 18, color: "#94a3b8", fontSize: 12.5, lineHeight: 1.7 }}>
+                  {diagnosis.reasoning.map((r, idx) => <li key={idx}>{r}</li>)}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
         {uncertainty && (
           <div style={{ padding: "12px 16px", borderTop: "1px solid rgba(255,255,255,.04)" }}>
-            <div style={{ color: "#94a3b8", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 5 }}>{isAnalysis ? "WHAT WE DON'T KNOW YET" : "⚠️ UNCERTAINTY"}</div>
+            <div style={{ color: "#94a3b8", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 5 }}>{isDiagnosis ? "WHAT WE DON'T KNOW YET" : "⚠️ UNCERTAINTY"}</div>
             <div style={{ color: "#64748b", fontSize: 12, lineHeight: 1.6 }}>{uncertainty}</div>
           </div>
         )}
@@ -108,7 +177,7 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbE
 
         {recommended_action && (
           <div style={{ padding: "14px 16px", background: "rgba(245,158,11,.05)", borderTop: "1px solid rgba(255,255,255,.04)" }}>
-            <div style={{ color: "#f59e0b", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 6 }}>{isAnalysis ? "WHAT WE'D INVESTIGATE NEXT" : "🎯 SMALLEST NEXT STEP"}</div>
+            <div style={{ color: "#f59e0b", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 6 }}>{isDiagnosis ? "WHAT WE'D INVESTIGATE NEXT" : "🎯 SMALLEST NEXT STEP"}</div>
             <div style={{ color: "#fbbf24", fontSize: 13, lineHeight: 1.6, fontWeight: 600 }}>{recommended_action}</div>
           </div>
         )}
@@ -131,23 +200,86 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbE
           </div>
         )}
 
-        {onFeedback && fbState !== "saved" && (
+        {/* SIGNAL-LEVEL FEEDBACK — lightweight, optional, no reason capture. */}
+        {isSignal && onFeedback && fbState !== "saved" && (
           <div style={{ padding: "12px 16px", borderTop: "1px solid rgba(255,255,255,.04)" }}>
-            {fbState === "idle" && (
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={() => onFeedback("positive")}
-                  style={{ flex: 1, padding: "9px", background: "rgba(16,185,129,.08)", border: "1px solid rgba(16,185,129,.2)", borderRadius: 10, color: "#10b981", fontWeight: 600, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
-                  👍 Helpful
-                </button>
-                <button onClick={() => onFeedback("negative")}
-                  style={{ flex: 1, padding: "9px", background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.15)", borderRadius: 10, color: "#ef4444", fontWeight: 600, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
-                  👎 Not helpful
-                </button>
-              </div>
+            {fbState === "saving" ? (
+              <div style={{ textAlign: "center", color: "#475569", fontSize: 11 }}>Saving...</div>
+            ) : (
+              <>
+                <div style={{ color: "#64748b", fontSize: 11, marginBottom: 8 }}>Was this analysis useful?</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => submitSignal("positive")}
+                    style={{ flex: 1, padding: "9px", background: "rgba(16,185,129,.08)", border: "1px solid rgba(16,185,129,.2)", borderRadius: 10, color: "#10b981", fontWeight: 600, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+                    👍 Yes
+                  </button>
+                  <button onClick={() => submitSignal("negative")}
+                    style={{ flex: 1, padding: "9px", background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.15)", borderRadius: 10, color: "#ef4444", fontWeight: 600, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+                    👎 Not really
+                  </button>
+                </div>
+              </>
             )}
-            {fbState === "saving" && <div style={{ textAlign: "center", color: "#475569", fontSize: 11 }}>Saving...</div>}
           </div>
         )}
+
+        {/* DIAGNOSIS-LEVEL FEEDBACK — the moment that actually matters. */}
+        {isDiagnosis && onFeedback && fbState !== "saved" && (
+          <div style={{ padding: "12px 16px", borderTop: "1px solid rgba(255,255,255,.04)" }}>
+            {fbState === "saving" ? (
+              <div style={{ textAlign: "center", color: "#475569", fontSize: 11 }}>Saving...</div>
+            ) : !showReasons ? (
+              <>
+                <div style={{ color: "#64748b", fontSize: 11, marginBottom: 8 }}>Does this diagnosis match what actually happened?</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={submitDiagnosisPositive}
+                    style={{ flex: 1, padding: "9px", background: "rgba(16,185,129,.08)", border: "1px solid rgba(16,185,129,.2)", borderRadius: 10, color: "#10b981", fontWeight: 600, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+                    👍 Yes, that matches
+                  </button>
+                  <button onClick={() => setShowReasons(true)}
+                    style={{ flex: 1, padding: "9px", background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.15)", borderRadius: 10, color: "#ef4444", fontWeight: 600, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+                    👎 No, that's not what happened
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div>
+                <div style={{ color: "#64748b", fontSize: 11, marginBottom: 8 }}>What's off about it?</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                  {DIAGNOSIS_REASONS.map(r => (
+                    <button key={r.id} onClick={() => setSelectedReason(r.id)}
+                      style={{
+                        padding: "6px 10px", borderRadius: 100, fontSize: 11, cursor: "pointer", fontFamily: "inherit",
+                        border: selectedReason === r.id ? "1px solid rgba(99,102,241,.5)" : "1px solid rgba(255,255,255,.1)",
+                        background: selectedReason === r.id ? "rgba(99,102,241,.15)" : "rgba(255,255,255,.03)",
+                        color: selectedReason === r.id ? "#818cf8" : "#94a3b8",
+                      }}>
+                      {r.label}
+                    </button>
+                  ))}
+                </div>
+                <textarea
+                  value={correctionText}
+                  onChange={e => setCorrectionText(e.target.value)}
+                  placeholder="Optional — tell us what actually happened, in your own words"
+                  rows={2}
+                  style={{ width: "100%", boxSizing: "border-box", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,.1)", background: "rgba(255,255,255,.03)", color: "#e2e8f0", fontSize: 12, fontFamily: "inherit", resize: "vertical", marginBottom: 8 }}
+                />
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => setShowReasons(false)}
+                    style={{ padding: "8px 12px", background: "transparent", border: "1px solid rgba(255,255,255,.08)", borderRadius: 10, color: "#64748b", fontWeight: 600, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+                    Cancel
+                  </button>
+                  <button onClick={submitDiagnosisNegative} disabled={!selectedReason}
+                    style={{ flex: 1, padding: "8px 12px", background: selectedReason ? "rgba(99,102,241,.15)" : "rgba(255,255,255,.03)", border: "1px solid rgba(99,102,241,.3)", borderRadius: 10, color: selectedReason ? "#818cf8" : "#475569", fontWeight: 700, fontSize: 12, cursor: selectedReason ? "pointer" : "not-allowed", fontFamily: "inherit" }}>
+                    Submit
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {fbState === "saved" && (
           <div style={{ padding: "10px 16px", textAlign: "center", borderTop: "1px solid rgba(255,255,255,.04)" }}>
             <span style={{ color: "#10b981", fontSize: 11 }}>🙏 Thanks</span>
@@ -352,11 +484,18 @@ export default function LifePath() {
     }
   };
 
-  const handleFeedback = async (msgIndex, rating) => {
+  const handleFeedback = async (msgIndex, payload) => {
     setFbStates(s => ({ ...s, [msgIndex]: "saving" }));
-    const result = await saveFeedback({ rating });
+    const result = await saveFeedback(payload);
     if (result.success) {
       setFbStates(s => ({ ...s, [msgIndex]: "saved" }));
+      // A correction is new evidence about the user's real situation — feed
+      // it back into the investigation as a normal turn so the reasoning
+      // state (hypotheses/diagnosis) can actually update, instead of just
+      // storing it as an inert rating.
+      if (payload.correction && payload.correction.trim()) {
+        sendMessage(payload.correction.trim());
+      }
     } else {
       setFbStates(s => ({ ...s, [msgIndex]: "error" }));
       setFbErrors(e => ({ ...e, [msgIndex]: result.error }));
@@ -543,7 +682,7 @@ export default function LifePath() {
                     key={i}
                     data={msg.structured}
                     onInvestigateDeeper={() => sendMessage("Yes, let's investigate further.")}
-                    onFeedback={(rating) => handleFeedback(i, rating)}
+                    onFeedback={(payload) => handleFeedback(i, payload)}
                     fbState={fbStates[i] || "idle"}
                     fbError={fbErrors[i]}
                   />
