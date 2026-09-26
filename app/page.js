@@ -37,13 +37,62 @@ const getUsage = () => {
   return u;
 };
 
-const MessageBubbleUser = ({ content }) => (
-  <div style={{ marginBottom: 14, display: "flex", justifyContent: "flex-end", animation: "fadeUp .3s both" }}>
-    <div style={{ background: "linear-gradient(135deg,#6366f1,#4f46e5)", borderRadius: "16px 16px 4px 16px", padding: "11px 15px", maxWidth: "82%", color: "#fff", fontSize: 14, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
-      {content?.length > 600 ? content.substring(0, 600) + "..." : content}
+const MessageBubbleUser = ({ content, onEdit, disabled }) => {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(content || "");
+
+  useEffect(() => { setDraft(content || ""); }, [content]);
+
+  if (editing) {
+    return (
+      <div style={{ marginBottom: 14, display: "flex", justifyContent: "flex-end", animation: "fadeUp .3s both" }}>
+        <div style={{ maxWidth: "88%", width: "100%" }}>
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={Math.min(8, Math.max(2, Math.ceil(draft.length / 40)))}
+            autoFocus
+            style={{ width: "100%", boxSizing: "border-box", padding: "11px 15px", borderRadius: "16px 16px 4px 16px", border: "1px solid rgba(99,102,241,.4)", background: "rgba(99,102,241,.08)", color: "#fff", fontSize: 14, lineHeight: 1.6, fontFamily: "inherit", resize: "vertical" }}
+          />
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 6 }}>
+            <button onClick={() => { setDraft(content || ""); setEditing(false); }}
+              style={{ padding: "6px 12px", background: "transparent", border: "1px solid rgba(255,255,255,.1)", borderRadius: 8, color: "#64748b", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                const t = draft.trim();
+                if (!t) return;
+                setEditing(false);
+                onEdit?.(t);
+              }}
+              disabled={!draft.trim()}
+              style={{ padding: "6px 14px", background: draft.trim() ? "rgba(99,102,241,.2)" : "rgba(255,255,255,.03)", border: "1px solid rgba(99,102,241,.4)", borderRadius: 8, color: draft.trim() ? "#818cf8" : "#475569", fontWeight: 700, fontSize: 12, cursor: draft.trim() ? "pointer" : "not-allowed", fontFamily: "inherit" }}>
+              Save & resend
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginBottom: 14, display: "flex", flexDirection: "column", alignItems: "flex-end", animation: "fadeUp .3s both" }}>
+      <div style={{ background: "linear-gradient(135deg,#6366f1,#4f46e5)", borderRadius: "16px 16px 4px 16px", padding: "11px 15px", maxWidth: "82%", color: "#fff", fontSize: 14, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+        {content?.length > 600 ? content.substring(0, 600) + "..." : content}
+      </div>
+      {onEdit && (
+        <button
+          onClick={() => setEditing(true)}
+          disabled={disabled}
+          title="Edit this message"
+          style={{ marginTop: 4, background: "transparent", border: "none", color: "#475569", fontSize: 11, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.4 : 1, padding: "2px 4px", fontFamily: "inherit" }}>
+          ✏️ Edit
+        </button>
+      )}
     </div>
-  </div>
-);
+  );
+};
 
 const DIAGNOSIS_REASONS = [
   { id: "not_my_problem", label: "That's not my problem" },
@@ -404,7 +453,7 @@ export default function LifePath() {
     setMessages((m) => [...m, { role: "assistant", content: "⚠️ Please upload a PDF or TXT file — other formats aren't supported yet. You can paste your CV text directly instead.", structured: null }]);
   };
 
-  const sendMessage = async (overrideText) => {
+  const sendMessage = async (overrideText, baseMessages) => {
     const userMsg = (overrideText || input).trim();
     if ((!userMsg && !cvFile) || loading || sendingRef.current) return;
     sendingRef.current = true;
@@ -415,6 +464,11 @@ export default function LifePath() {
       alert("Daily limit reached. Come back tomorrow.");
       return;
     }
+
+    // baseMessages lets an edit-and-resend build on the just-truncated
+    // history explicitly, instead of the (possibly stale, pre-truncation)
+    // `messages` closure from this render.
+    const historyBase = baseMessages || messages;
 
     const attachedCv = cvFile;
     setInput("");
@@ -428,7 +482,7 @@ export default function LifePath() {
       return text.length > max ? text.slice(0, max) + " ...[truncated]" : text;
     };
 
-    const fullApiMessages = messages
+    const fullApiMessages = historyBase
       .filter(m => m.content || m.structured)
       .map(m => ({
         role: m.role,
@@ -450,7 +504,7 @@ export default function LifePath() {
 
     apiMessages.push({ role: "user", content: outgoingText });
 
-    const newMsgs = [...messages, { role: "user", content: displayText }];
+    const newMsgs = [...historyBase, { role: "user", content: displayText }];
     setMessages(newMsgs);
     setLoading(true);
     S.set("lp_usage", { ...usage, count: usage.count + 1 });
@@ -482,6 +536,28 @@ export default function LifePath() {
       e.preventDefault();
       if (!loading) sendMessage();
     }
+  };
+
+  // Editing a past message drops it and everything after it (its answer is
+  // no longer valid once the question changes), then resends the edited
+  // text as a fresh turn — the same "edit and regenerate" pattern other
+  // chat assistants use. Any feedback state tied to the now-discarded
+  // messages is cleared so it can't bleed onto whatever reoccupies those
+  // slots. Note: this only rewinds what's shown in this chat — it does not
+  // roll back the server-side investigation state (facts/hypotheses
+  // already recorded from the original branch stay recorded).
+  const handleEditMessage = (index, newText) => {
+    if (loading || sendingRef.current) return;
+    const truncated = messages.slice(0, index);
+    setMessages(truncated);
+    const keepBelow = (obj) => {
+      const next = {};
+      Object.entries(obj).forEach(([k, v]) => { if (Number(k) < index) next[k] = v; });
+      return next;
+    };
+    setFbStates(keepBelow);
+    setFbErrors(keepBelow);
+    sendMessage(newText, truncated);
   };
 
   const handleFeedback = async (msgIndex, payload) => {
@@ -675,7 +751,14 @@ export default function LifePath() {
               </div>
             )}
             {messages.map((msg, i) => {
-              if (msg.role === "user") return <MessageBubbleUser key={i} content={msg.content} />;
+              if (msg.role === "user") return (
+                <MessageBubbleUser
+                  key={i}
+                  content={msg.content}
+                  disabled={loading || clearing}
+                  onEdit={(newText) => handleEditMessage(i, newText)}
+                />
+              );
               if (msg.structured) {
                 return (
                   <InvestigationCard
