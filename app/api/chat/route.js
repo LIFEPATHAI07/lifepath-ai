@@ -156,12 +156,44 @@ The moment the user reports having had interviews (however many), do NOT jump to
 ━━━━━━━━━━━━━━
 CV — ONLY REASON ABOUT WHAT YOU'VE ACTUALLY SEEN
 ━━━━━━━━━━━━━━
-Before the CV is uploaded, a CV-fit hypothesis can exist and be discussed as a hypothesis, but never as a finding. Only once the user has actually attached/pasted CV content may you analyze the CV itself. Only once representative job descriptions are also available may you make specific CV-to-job or keyword claims. "I use the same CV for every application" is a fact worth investigating, never a stated conclusion.
+Before the CV is uploaded, a CV-fit hypothesis can exist and be discussed as a hypothesis, but never as a finding. Only once the user has actually attached/pasted CV content may you analyze the CV itself. Only once representative job descriptions are also available may you make specific CV-to-job or keyword claims (mark jobDescriptionsProvided true once you actually have them). "I use the same CV for every application" is a fact worth investigating, never a stated conclusion. Do not let a CV/ATS hypothesis become the default explanation just because the user reused one CV, got no responses, had applications marked "viewed", or is a fresher — each of those is consistent with several other explanations too.
+
+━━━━━━━━━━━━━━
+"VIEWED" IS A PORTAL STATUS, NOT A HUMAN JUDGMENT
+━━━━━━━━━━━━━━
+If a portal reports applications as "viewed", the fact is exactly that: "the portal reported approximately N applications as viewed." Never convert this into "a recruiter opened and evaluated your CV", never invent how long they spent looking, and never treat it as evidence of a considered human rejection. What "viewed" actually means varies by platform and is frequently automated — treat its meaning as itself an open question, not settled fact, unless the user clarifies it.
+
+━━━━━━━━━━━━━━
+APPLICATIONS ARE NOT NECESSARILY UNIQUE OPPORTUNITIES
+━━━━━━━━━━━━━━
+500 applications does not automatically mean 500 unique vacancies — postings get reposted, the same company/consultancy can appear many times, and portals sometimes auto-match the same listing repeatedly. If this is plausible given what the user has described (e.g. a small local market with a very high application count), raise it as an investigation question ("were many of these the same company or repeated listings, or all different employers?") rather than assuming either way.
+
+━━━━━━━━━━━━━━
+DIRECT APPLICATIONS AREN'T AUTOMATICALLY "REACHED" EITHER
+━━━━━━━━━━━━━━
+An email or contact-form submission landing somewhere is not proof a decision-maker read it. Don't assume a direct application was evaluated any more than a portal one was — ask how it was sent and whether there was any acknowledgment, rather than assuming direct = seen.
+
+━━━━━━━━━━━━━━
+CASE UNDERSTANDING — TRACK THIS, DON'T DEMAND IT ALL AT ONCE
+━━━━━━━━━━━━━━
+Keep a running picture of the user's actual case across these categories (store what's known in facts_update; the rest simply stays unasked until it's actually needed to distinguish between live hypotheses):
+- USER: target role, location, experience, education, skills/tools, employment status.
+- SEARCH: timeframe, total applications, distinct companies/roles if known.
+- CHANNELS: portals, direct, referrals, walk-ins, etc.
+- OUTCOMES: no status, viewed, rejected, recruiter contact, interview (and its specific outcome), offer.
+- MATERIALS: CV provided? job descriptions provided? tailored or same CV each time?
+- SEARCH BEHAVIOR: how roles are chosen, whether applications are tailored, whether the user follows up.
+Do not require every field before speaking — only ask for what's actually missing AND critical to whichever hypothesis you're currently trying to distinguish. A short, high-value question beats a long questionnaire; a frustrated user wants short question → useful evidence → narrower case → next question, not an interrogation.
+
+━━━━━━━━━━━━━━
+FINAL RESPONSE FORMAT — ONCE A DIAGNOSIS IS GENUINELY EARNED
+━━━━━━━━━━━━━━
+When feedback_mode is "diagnosis", structure the substance across the existing fields so the user gets real clarity, not another vague chatbot answer: `reply`/`insight` should cover what we actually know (the key facts) and what the evidence shows (how those facts connect to the explanation); `uncertainty` should state plainly what still can't be proven; `diagnosis.bottleneck`/`diagnosis.reasoning` is the earned explanation itself; `recommended_action` should be the specific next step AND, in the same field, one honest clause on why it's worth doing (tied to the actual evidence, not generic encouragement) — never bare "everything will be fine" reassurance, give a concrete reason the next step matters.
 
 ━━━━━━━━━━━━━━
 SAMPLE SIZE ≠ CERTAINTY
 ━━━━━━━━━━━━━━
-A large number attached to a poor outcome (500 applications with almost no response; 6 interviews with 0 offers) justifies "this is worth investigating further." It does NOT by itself justify naming that stage the bottleneck. Confidence comes from the specificity and relevance of the evidence gathered about WHY, not from how big the denominator is.
+A large number attached to a poor outcome (500 applications with almost no response; 6 interviews with 0 offers) justifies "this is worth investigating further." It does NOT by itself justify naming that stage the bottleneck. Confidence comes from the specificity and relevance of the evidence gathered about WHY, not from how big the denominator is. Application volume ALONE — with no channel breakdown, no CV evidence, no known interview outcomes — can never earn a diagnosis by itself, no matter how large it is.
 
 ━━━━━━━━━━━━━━
 STATE CONSISTENCY — NEWER, MORE SPECIFIC FACTS WIN
@@ -222,9 +254,13 @@ RESPONSE JSON — OUTPUT ONLY THIS, NOTHING ELSE
     "applicationsTotal": null,
     "responses": null,
     "interviews": null,
+    "viewedCount": null,
     "channels": { "portals": null, "direct": null },
     "channelResponses": { "portals": null, "direct": null },
     "cvProvided": false,
+    "jobDescriptionsProvided": false,
+    "sameCvForEveryApplication": null,
+    "employmentStatus": "",
     "recentInterviewOutcomes": []
   },
   "signal": "the raw, causally-neutral pattern you're currently looking at, e.g. '0 offers from 6 interviews reported so far' — empty string if there's no new signal this turn",
@@ -253,11 +289,11 @@ RESPONSE JSON — OUTPUT ONLY THIS, NOTHING ELSE
   "feedback_mode": "none"
 }
 
-Rules for facts_update: only include a field if the user stated it THIS turn or it changed. Set cvProvided to true only if the user actually attached/pasted CV content this turn. For recentInterviewOutcomes, include the FULL updated list of short outcome entries (e.g. ["Interview 1 (TechCorp): ghosted", "Interview 2: rejected after technical round", "Interview 3: still waiting"]) whenever the user gives or updates this information — each entry should be a short human-readable outcome, not a raw category word alone.
+Rules for facts_update: only include a field if the user stated it THIS turn or it changed. Set cvProvided to true only if the user actually attached/pasted CV content this turn. Set jobDescriptionsProvided to true only once the user has actually given representative job posting text/requirements this turn or previously — never infer it. viewedCount is a PORTAL-REPORTED status count only (e.g. "30 marked as viewed") — record it as its own fact, never merge it into responses/interviews and never imply it means a human evaluated the application. sameCvForEveryApplication is a plain boolean fact about their process, not a judgment. For recentInterviewOutcomes, include the FULL updated list of short outcome entries (e.g. ["Interview 1 (TechCorp): ghosted", "Interview 2: rejected after technical round", "Interview 3: still waiting"]) whenever the user gives or updates this information — each entry should be a short human-readable outcome, not a raw category word alone.
 
-Rules for hypotheses: keep at most 3 hypotheses active at once — the ones actually worth tracking, not every conceivable one. Once any hypothesis exists, output the FULL current array every turn (carry forward ones from JOB SEARCH STATE, update their status/confidence/evidence fields in light of this turn, never silently drop one). Leave the array empty ONLY before any hypothesis is worth naming yet. Keep each evidence field (supportingEvidence/contradictingEvidence/missingEvidence) to one short sentence or leave it empty — do not pad these.
+Rules for hypotheses: keep at most 3 hypotheses active at once — the ones actually worth tracking, not every conceivable one. Once any hypothesis exists, output the FULL current array every turn (carry forward ones from JOB SEARCH STATE, update their status/confidence/evidence fields in light of this turn, never silently drop one). Leave the array empty ONLY before any hypothesis is worth naming yet. Keep each evidence field (supportingEvidence/contradictingEvidence/missingEvidence) to one short sentence or leave it empty — do not pad these. IMPORTANT: the server independently re-derives status/confidence from these three fields and will downgrade (never upgrade) whatever you claim — empty supportingEvidence caps you at "investigating"/"low" no matter what status/confidence you write; a non-empty missingEvidence caps you at "plausible" and "low" confidence (this is the fix for the "we still don't know X, but confidence: medium" contradiction — if you write something in missingEvidence, confidence must NOT read as medium/high, so don't bother claiming it); a non-empty contradictingEvidence caps you at "plausible"/"medium". Only supportingEvidence present + missingEvidence empty + contradictingEvidence empty allows "supported"/"confirmed" and "high" through. So write these fields honestly — inflating status/confidence without clearing missingEvidence/contradictingEvidence first accomplishes nothing.
 
-Rules for diagnosis: leave bottleneck as "" unless it is genuinely earned (see THE HARD REASONING MODEL above). "reasoning" is a short array of specific evidence bullets for that diagnosis — not generic restatement of the signal.
+Rules for diagnosis: leave bottleneck as "" unless it is genuinely earned (see THE HARD REASONING MODEL above). "reasoning" is a short array of specific evidence bullets for that diagnosis — not generic restatement of the signal. The server independently requires that your diagnosis is actually about a hypothesis that reached "supported"/"confirmed" status this turn (a disconnected diagnosis will be rejected even if you set feedback_mode to "diagnosis"), and a CV/resume/ATS-worded diagnosis is rejected unless both cvProvided and jobDescriptionsProvided are true in state.
 
 Rules for feedback_mode — this is what the backend uses to decide what kind of feedback control (if any) to show the user, so answer honestly, not optimistically:
 - "none" — an ordinary clarifying/investigating turn. No meaningful signal or diagnosis this turn.
@@ -460,10 +496,13 @@ const SAFE_DEFAULTS = {
   reply: "",
   facts_update: {
     problemStatement: "", roleTarget: "", location: "", experienceLevel: "",
-    applicationsTotal: null, responses: null, interviews: null,
+    applicationsTotal: null, responses: null, interviews: null, viewedCount: null,
     channels: { portals: null, direct: null },
     channelResponses: { portals: null, direct: null },
     cvProvided: false,
+    jobDescriptionsProvided: false,
+    sameCvForEveryApplication: null,
+    employmentStatus: "",
     recentInterviewOutcomes: [],
   },
   signal: "",
@@ -514,6 +553,72 @@ function sanitizeDiagnosis(d) {
   return { bottleneck, confidence, reasoning };
 }
 
+// ── THE MAIN SERVER-SIDE FIX ────────────────────────────────────────────
+// The model's claimed status/confidence for a hypothesis is a PROPOSAL,
+// never a fact. This deterministically re-derives the maximum status/
+// confidence a hypothesis is allowed to have, purely from which of its own
+// evidence fields are actually populated — the server can only ever
+// downgrade what the model claims, never upgrade it. This directly fixes
+// the repeated failure of "we still don't know X" being paired with
+// "confidence: medium" in the same turn: if missingEvidence is non-empty,
+// confidence is structurally capped below medium, full stop.
+const STATUS_RANK = { untested: 0, investigating: 1, weak: 1, plausible: 2, supported: 3, confirmed: 4 };
+const CONFIDENCE_RANK = { low: 0, medium: 1, high: 2 };
+const STATUS_ORDER = ["untested", "investigating", "plausible", "supported", "confirmed"];
+const CONFIDENCE_ORDER = ["low", "medium", "high"];
+
+function capStatus(status, maxRank) {
+  if ((STATUS_RANK[status] ?? 0) <= maxRank) return status;
+  for (let i = STATUS_ORDER.length - 1; i >= 0; i--) {
+    if ((STATUS_RANK[STATUS_ORDER[i]] ?? 0) <= maxRank) return STATUS_ORDER[i];
+  }
+  return "untested";
+}
+function capConfidence(confidence, maxRank) {
+  if ((CONFIDENCE_RANK[confidence] ?? 0) <= maxRank) return confidence;
+  for (let i = CONFIDENCE_ORDER.length - 1; i >= 0; i--) {
+    if ((CONFIDENCE_RANK[CONFIDENCE_ORDER[i]] ?? 0) <= maxRank) return CONFIDENCE_ORDER[i];
+  }
+  return "low";
+}
+
+function enforceHypothesisEvidenceLadder(h) {
+  const hasSupport = !!h.supportingEvidence;
+  const hasMissing = !!h.missingEvidence;
+  const hasContradiction = !!h.contradictingEvidence;
+
+  let maxStatusRank;
+  let maxConfidenceRank;
+
+  if (!hasSupport) {
+    // No claim-specific supporting evidence at all → can't be more than
+    // "investigating", confidence must stay "low".
+    maxStatusRank = STATUS_RANK.investigating;
+    maxConfidenceRank = CONFIDENCE_RANK.low;
+  } else if (hasMissing) {
+    // Support exists, but the model itself flags evidence still missing —
+    // "worth investigating" is not "medium confidence".
+    maxStatusRank = STATUS_RANK.plausible;
+    maxConfidenceRank = CONFIDENCE_RANK.low;
+  } else if (hasContradiction) {
+    // Nothing flagged missing, but there's a live, unresolved contradiction
+    // — can be taken seriously, but not confirmed.
+    maxStatusRank = STATUS_RANK.plausible;
+    maxConfidenceRank = CONFIDENCE_RANK.medium;
+  } else {
+    // Support present, nothing missing, no live contradiction — the
+    // model's own claim is allowed through in full.
+    maxStatusRank = STATUS_RANK.confirmed;
+    maxConfidenceRank = CONFIDENCE_RANK.high;
+  }
+
+  return {
+    ...h,
+    status: capStatus(h.status, maxStatusRank),
+    confidence: capConfidence(h.confidence, maxConfidenceRank),
+  };
+}
+
 const sanitizeStructured = (parsed) => {
   if (!parsed || typeof parsed !== "object") return null;
   const merged = {
@@ -525,7 +630,7 @@ const sanitizeStructured = (parsed) => {
   merged.facts_update.channelResponses = { ...SAFE_DEFAULTS.facts_update.channelResponses, ...(parsed.facts_update?.channelResponses || {}) };
 
   merged.hypotheses = Array.isArray(parsed.hypotheses)
-    ? parsed.hypotheses.map(sanitizeHypothesis).filter(Boolean).slice(0, MAX_HYPOTHESES)
+    ? parsed.hypotheses.map(sanitizeHypothesis).filter(Boolean).map(enforceHypothesisEvidenceLadder).slice(0, MAX_HYPOTHESES)
     : [];
   merged.diagnosis = sanitizeDiagnosis(parsed.diagnosis);
   merged.signal = typeof parsed.signal === "string" ? parsed.signal.slice(0, 300) : "";
@@ -557,7 +662,11 @@ function extractNonEmptyUpdates(factsUpdate) {
   if (factsUpdate.applicationsTotal != null) updates.applicationsTotal = factsUpdate.applicationsTotal;
   if (factsUpdate.responses != null) updates.responses = factsUpdate.responses;
   if (factsUpdate.interviews != null) updates.interviews = factsUpdate.interviews;
+  if (factsUpdate.viewedCount != null) updates.viewedCount = factsUpdate.viewedCount;
   if (factsUpdate.cvProvided === true) updates.cvProvided = true;
+  if (factsUpdate.jobDescriptionsProvided === true) updates.jobDescriptionsProvided = true;
+  if (factsUpdate.sameCvForEveryApplication != null) updates.sameCvForEveryApplication = factsUpdate.sameCvForEveryApplication;
+  if (factsUpdate.employmentStatus) updates.employmentStatus = factsUpdate.employmentStatus;
   if (Array.isArray(factsUpdate.recentInterviewOutcomes) && factsUpdate.recentInterviewOutcomes.length > 0) {
     updates.recentInterviewOutcomes = factsUpdate.recentInterviewOutcomes.slice(0, 5);
   }
@@ -642,25 +751,33 @@ function leadingHypothesis(hypotheses) {
 // Require real evidence — some combination of application volume, channel
 // data, CV evidence, or a genuinely sufficient set of known interview
 // outcomes — before a "diagnosis" is allowed to render at all.
-function computeDiagnosisEligibility(state) {
+const CV_RELATED_PATTERN = /\b(cv|resume|résumé|ats|keyword|formatting|template)\b/i;
+
+function computeDiagnosisEligibility(state, diagnosis) {
   if (!state) return false;
 
-  const hasVolume = state.applicationsTotal != null && state.applicationsTotal > 0;
+  const hasRoleAndLocation = !!state.roleTarget && !!state.location;
+  if (!hasRoleAndLocation) return false;
+
   const hasChannelData =
     (state.channels?.portals != null || state.channels?.direct != null) &&
     (state.channelResponses?.portals != null || state.channelResponses?.direct != null);
   const hasCv = state.cvProvided === true;
+  const hasJobDescriptions = state.jobDescriptionsProvided === true;
   const interviewOutcomeCount = Array.isArray(state.recentInterviewOutcomes) ? state.recentInterviewOutcomes.length : 0;
   // "0 offers from 6 interviews" alone is a SIGNAL, not enough for a
   // diagnosis — require that at least a handful of the actual outcomes are
   // known (technical rejection vs. ghosted vs. still-pending are very
   // different evidence) before an interview-stage diagnosis is eligible.
   const hasSufficientInterviewEvidence = interviewOutcomeCount >= 3;
-  const hasRoleAndLocation = !!state.roleTarget && !!state.location;
 
-  if (!hasRoleAndLocation) return false;
-
-  const hasBaseEvidence = hasChannelData || hasCv || hasVolume || hasSufficientInterviewEvidence;
+  // Application volume ALONE is never enough — it's a sample-size fact,
+  // not evidence for any cause. Only channel-level data (which carries an
+  // actual response comparison), real CV evidence, or known interview
+  // outcomes count toward eligibility. (A bare applicationsTotal used to be
+  // accepted here on its own — that was the exact bug: "diagnose from
+  // application count alone" is explicitly forbidden.)
+  const hasBaseEvidence = hasChannelData || hasCv || hasSufficientInterviewEvidence;
   if (!hasBaseEvidence) return false;
 
   // Hard block: raw interview/offer counts with fewer than 3 known specific
@@ -668,6 +785,32 @@ function computeDiagnosisEligibility(state) {
   // bottleneck — regardless of what the model claims.
   const onlyRawInterviewSignal = state.interviews != null && state.interviews > 0 && !hasSufficientInterviewEvidence;
   if (onlyRawInterviewSignal && !hasChannelData && !hasCv) return false;
+
+  // A diagnosis must be anchored to a hypothesis that has actually reached
+  // "supported" or "confirmed" status under the evidence ladder above — not
+  // merely asserted in the diagnosis object this turn, disconnected from
+  // any tracked hypothesis.
+  const hypotheses = Array.isArray(state.hypotheses) ? state.hypotheses : [];
+  const qualifying = hypotheses.filter((h) => h.status === "supported" || h.status === "confirmed");
+  if (qualifying.length === 0) return false;
+
+  if (diagnosis?.bottleneck) {
+    // Loose word-overlap check that the diagnosis is actually ABOUT one of
+    // the qualifying hypotheses — exact semantic matching isn't possible
+    // server-side, so this only catches a diagnosis that rides on a
+    // completely unrelated hypothesis's earned confidence.
+    const bottleneckWords = diagnosis.bottleneck.toLowerCase().match(/[a-z]{4,}/g) || [];
+    const linked = qualifying.some((h) => {
+      const labelWords = (h.label || "").toLowerCase().match(/[a-z]{4,}/g) || [];
+      return labelWords.some((w) => bottleneckWords.includes(w));
+    });
+    if (!linked) return false;
+
+    // CV/ATS-worded diagnoses specifically require having actually compared
+    // the real CV against real job descriptions — never allowed just from
+    // response counts or "same CV every time" alone.
+    if (CV_RELATED_PATTERN.test(diagnosis.bottleneck) && !(hasCv && hasJobDescriptions)) return false;
+  }
 
   return true;
 }
@@ -679,7 +822,7 @@ function computeFeedbackMode(structured, state) {
   const claimed = structured.feedback_mode;
 
   if (claimed === "diagnosis") {
-    const eligible = computeDiagnosisEligibility(state) && !!structured.diagnosis?.bottleneck;
+    const eligible = computeDiagnosisEligibility(state, structured.diagnosis) && !!structured.diagnosis?.bottleneck;
     if (eligible) return "diagnosis";
     // Not earned yet — fall through to "signal" if there's at least a real
     // insight/signal to show, otherwise "none".
