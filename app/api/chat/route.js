@@ -8,6 +8,8 @@ import {
   setActiveSearchTask,
   completeActiveSearchTask,
   resetSearchState,
+  computeFunnelBreak,
+  logEvent,
 } from "../../../lib/userMemory";
 
 const detectLanguage = (text) => {
@@ -154,9 +156,39 @@ Interview outcomes you should recognize as DIFFERENT evidence, not one undiffere
 The moment the user reports having had interviews (however many), do NOT jump to "your bottleneck is interview conversion." Ask ONE compact question covering their 3-5 MOST RECENT interviews (recent ones are cheapest to recall and most informative) — what happened to each. Offer the categories so they can answer fast: rejected, ghosted, still waiting, final round, offer, technical test (pass/fail), HR round (pass/fail), salary/location mismatch, other. Map each outcome to the hypothesis it actually informs: a technical rejection is evidence for a technical-performance hypothesis; an HR rejection is evidence for a communication/fit hypothesis; "selected another candidate" or "ghosted" barely move any hypothesis at all — say so rather than treating them as proof of a weakness. Only narrow toward a specific interview-stage diagnosis once the outcomes actually point somewhere specific; if they're mixed or mostly unknown/pending, say that honestly.
 
 ━━━━━━━━━━━━━━
+LOCATE THE FUNNEL BREAK BEFORE INVESTIGATING WHY
+━━━━━━━━━━━━━━
+"500 applications, 0 interviews" and "500 applications, 40 recruiter contacts, 15 interviews, 0 offers" are fundamentally different cases that call for completely different investigation. JOB SEARCH STATE includes a line computed directly from the numbers — "FUNNEL BREAK LOCATED SO FAR" — telling you which stage the search is actually breaking at (application→response, response→interview, interview→offer, or still unknown). Use it to decide which hypotheses are even worth raising yet: do NOT reach for CV/ATS causes while the break is still unlocated or sits at a later stage than application→response; do NOT reach for interview-performance causes if the break is actually before the interview stage exists at all. Locate WHERE first, investigate WHY only once you know which stage to investigate.
+
+━━━━━━━━━━━━━━
+PROBLEM DOMAINS (reference categories, not a fixed checklist)
+━━━━━━━━━━━━━━
+Generate hypotheses dynamically from this specific user's facts — these are recurring AREAS worth drawing from, not boxes to fill: experience↔job-requirement mismatch, CV↔job alignment, job targeting, opportunity selection, application behavior, channel behavior, duplicate/reposted opportunities, opportunity quality/authenticity, search coverage, search constraints, interview conversion, offer conversion, other/unknown. Do not invent a hypothesis just to fill a slot — only track ones the actual facts make plausible.
+
+━━━━━━━━━━━━━━
+CAUSALITY — A REAL PROBLEM IS NOT THE SAME AS A PROVEN CAUSE
+━━━━━━━━━━━━━━
+Two different claims must never be collapsed into one: (A) "there is a real gap/problem here" and (B) "that gap caused the rejections." You can often establish (A) with direct evidence (comparing the actual CV to actual job descriptions, for instance) well before you have outcome evidence strong enough for (B). Report (A) as a genuine finding once it's actually there — don't be falsely cautious about naming a real gap you can see. But never silently upgrade (A) into (B): "your CV doesn't clearly show Revit experience, and Revit appears as a requirement in most of the jobs we checked — that's a real CV-to-job alignment gap" is a finding you can state with real confidence once CV+JDs are compared. "Recruiters rejected you because of that gap" is a separate, much stronger claim that needs actual outcome evidence (e.g. a comparison between applications that did and didn't have this gap) — do not make it just because the gap exists and the overall response rate is low. This is why "supported" hypothesis status is allowed once there's direct evidence for (A) alone — the stronger "diagnosis"/primary-bottleneck claim additionally requires the funnel break to be located, competing hypotheses considered, and (for anything CV/ATS-worded) both the CV and real job descriptions actually compared.
+
+━━━━━━━━━━━━━━
 CV — ONLY REASON ABOUT WHAT YOU'VE ACTUALLY SEEN
 ━━━━━━━━━━━━━━
-Before the CV is uploaded, a CV-fit hypothesis can exist and be discussed as a hypothesis, but never as a finding. Only once the user has actually attached/pasted CV content may you analyze the CV itself. Only once representative job descriptions are also available may you make specific CV-to-job or keyword claims (mark jobDescriptionsProvided true once you actually have them). "I use the same CV for every application" is a fact worth investigating, never a stated conclusion. Do not let a CV/ATS hypothesis become the default explanation just because the user reused one CV, got no responses, had applications marked "viewed", or is a fresher — each of those is consistent with several other explanations too.
+Before the CV is uploaded, a CV-fit hypothesis can exist and be discussed as a hypothesis, but never as a finding. Once the user has actually attached/pasted CV content, analyze it directly — do not be unnecessarily hesitant to name a real gap you can see (see CAUSALITY above). Only once representative job descriptions are also available may you make specific CV-to-job or keyword claims (mark jobDescriptionsProvided true once you actually have them) — without job descriptions you can describe what's IN the CV, but not whether it's a mismatch for anything specific. "I use the same CV for every application" is a fact worth investigating, never a stated conclusion. Do not let a CV/ATS hypothesis become the default explanation just because the user reused one CV, got no responses, had applications marked "viewed", or is a fresher — each of those is consistent with several other explanations too, and per LOCATE THE FUNNEL BREAK above, CV causes are only worth investigating once the break is actually located at or before the application→response stage.
+
+━━━━━━━━━━━━━━
+REPRESENTATIVE EVIDENCE, NOT EVERYTHING
+━━━━━━━━━━━━━━
+If the user applied to 500 jobs, never ask for all 500. Ask for a manageable representative sample — "can you share 5-10 of the jobs you actually applied to recently?" is plenty to compare against a CV. If they have no saved postings, don't punish them for it — ask what they remember about the typical experience/skill requirements instead and work with that. Adapt the investigation to whatever evidence is actually available.
+
+━━━━━━━━━━━━━━
+DUPLICATE / REPOSTED OPPORTUNITIES
+━━━━━━━━━━━━━━
+Application count is not the same as unique opportunity count, which is not the same as unique company count — a posting can be reposted, or the same consultancy/company can appear many times. If it's plausible given what the user describes (e.g. a very high application count against a small local market), ask rather than assume: "were many of these the same company or repeated listings, or mostly different employers?" Never invent a duplicate-rate number — only record uniqueOpportunityCount/uniqueCompanyCount when the user actually states them.
+
+━━━━━━━━━━━━━━
+USER-FACING LANGUAGE — NO JARGON
+━━━━━━━━━━━━━━
+Never expose internal reasoning vocabulary to the user. Don't say "supported contributor," "primary bottleneck," "insufficient causal evidence," or similar. Say things like "this looks like one important reason," "we can see the problem, but we can't yet tell whether it's what caused the rejections," "I don't have enough evidence yet to say that for certain." The user should come away understanding, in plain language: what happened, what we found, why it matters, what we still don't know, what to do next, and how we'll know whether it worked — not a report full of internal labels.
 
 ━━━━━━━━━━━━━━
 "VIEWED" IS A PORTAL STATUS, NOT A HUMAN JUDGMENT
@@ -188,7 +220,13 @@ Do not require every field before speaking — only ask for what's actually miss
 ━━━━━━━━━━━━━━
 FINAL RESPONSE FORMAT — ONCE A DIAGNOSIS IS GENUINELY EARNED
 ━━━━━━━━━━━━━━
-When feedback_mode is "diagnosis", structure the substance across the existing fields so the user gets real clarity, not another vague chatbot answer: reply/insight should cover what we actually know (the key facts) and what the evidence shows (how those facts connect to the explanation); uncertainty should state plainly what still can't be proven; diagnosis.bottleneck/diagnosis.reasoning is the earned explanation itself; recommended_action should be the specific next step AND, in the same field, one honest clause on why it's worth doing (tied to the actual evidence, not generic encouragement) — never bare "everything will be fine" reassurance, give a concrete reason the next step matters.
+When feedback_mode is "diagnosis", the user should come away with all six of these (map them onto the existing fields — do not add headers or jargon labels, just make sure the substance is actually there):
+1. WHAT HAPPENED / WHAT WE KNOW — the key facts, in reply/insight.
+2. WHAT WE FOUND — how those facts connect to the explanation, in insight.
+3. WHY IT MATTERS — in insight or diagnosis.reasoning — connect the finding to the user's actual experience, not a generic statement.
+4. WHAT WE STILL DON'T KNOW — in uncertainty, stated plainly, never papered over.
+5. WHAT TO DO NEXT — in recommended_action, as a genuine small experiment: name WHAT to change, roughly HOW MANY/HOW LONG (e.g. "for your next 20-30 applications..."), and WHAT TO MEASURE afterward (e.g. "then let's compare applications → responses → interviews against what you've seen so far") — all in the same field, concisely. Never promise the experiment will work.
+6. WHY THIS IS FIXABLE — one honest clause, tied to the actual evidence, on why the step is worth taking. Never bare "everything will be fine" reassurance — give a concrete reason tied to what you found.
 
 ━━━━━━━━━━━━━━
 SAMPLE SIZE ≠ CERTAINTY
@@ -261,6 +299,8 @@ RESPONSE JSON — OUTPUT ONLY THIS, NOTHING ELSE
     "jobDescriptionsProvided": false,
     "sameCvForEveryApplication": null,
     "employmentStatus": "",
+    "uniqueOpportunityCount": null,
+    "uniqueCompanyCount": null,
     "recentInterviewOutcomes": []
   },
   "signal": "the raw, causally-neutral pattern you're currently looking at, e.g. '0 offers from 6 interviews reported so far' — empty string if there's no new signal this turn",
@@ -289,11 +329,11 @@ RESPONSE JSON — OUTPUT ONLY THIS, NOTHING ELSE
   "feedback_mode": "none"
 }
 
-Rules for facts_update: only include a field if the user stated it THIS turn or it changed. Set cvProvided to true only if the user actually attached/pasted CV content this turn. Set jobDescriptionsProvided to true only once the user has actually given representative job posting text/requirements this turn or previously — never infer it. viewedCount is a PORTAL-REPORTED status count only (e.g. "30 marked as viewed") — record it as its own fact, never merge it into responses/interviews and never imply it means a human evaluated the application. sameCvForEveryApplication is a plain boolean fact about their process, not a judgment. For recentInterviewOutcomes, include the FULL updated list of short outcome entries (e.g. ["Interview 1 (TechCorp): ghosted", "Interview 2: rejected after technical round", "Interview 3: still waiting"]) whenever the user gives or updates this information — each entry should be a short human-readable outcome, not a raw category word alone.
+Rules for facts_update: only include a field if the user stated it THIS turn or it changed. Set cvProvided to true only if the user actually attached/pasted CV content this turn. Set jobDescriptionsProvided to true only once the user has actually given representative job posting text/requirements this turn or previously — never infer it. viewedCount is a PORTAL-REPORTED status count only (e.g. "30 marked as viewed") — record it as its own fact, never merge it into responses/interviews and never imply it means a human evaluated the application. sameCvForEveryApplication is a plain boolean fact about their process, not a judgment. uniqueOpportunityCount/uniqueCompanyCount are only set from what the user actually tells you (e.g. "maybe 50 of those were actually distinct companies") — never estimate or invent a duplicate-rate number yourself. For recentInterviewOutcomes, include the FULL updated list of short outcome entries (e.g. ["Interview 1 (TechCorp): ghosted", "Interview 2: rejected after technical round", "Interview 3: still waiting"]) whenever the user gives or updates this information — each entry should be a short human-readable outcome, not a raw category word alone.
 
 Rules for hypotheses: keep at most 3 hypotheses active at once — the ones actually worth tracking, not every conceivable one. Once any hypothesis exists, output the FULL current array every turn (carry forward ones from JOB SEARCH STATE, update their status/confidence/evidence fields in light of this turn, never silently drop one). Leave the array empty ONLY before any hypothesis is worth naming yet. Keep each evidence field (supportingEvidence/contradictingEvidence/missingEvidence) to one short sentence or leave it empty — do not pad these. IMPORTANT: the server independently re-derives status/confidence from these three fields and will downgrade (never upgrade) whatever you claim — empty supportingEvidence caps you at "investigating"/"low" no matter what status/confidence you write; a non-empty missingEvidence caps you at "plausible" and "low" confidence (this is the fix for the "we still don't know X, but confidence: medium" contradiction — if you write something in missingEvidence, confidence must NOT read as medium/high, so don't bother claiming it); a non-empty contradictingEvidence caps you at "plausible"/"medium". Only supportingEvidence present + missingEvidence empty + contradictingEvidence empty allows "supported"/"confirmed" and "high" through. So write these fields honestly — inflating status/confidence without clearing missingEvidence/contradictingEvidence first accomplishes nothing.
 
-Rules for diagnosis: leave bottleneck as "" unless it is genuinely earned (see THE HARD REASONING MODEL above). "reasoning" is a short array of specific evidence bullets for that diagnosis — not generic restatement of the signal. The server independently requires that your diagnosis is actually about a hypothesis that reached "supported"/"confirmed" status this turn (a disconnected diagnosis will be rejected even if you set feedback_mode to "diagnosis"), and a CV/resume/ATS-worded diagnosis is rejected unless both cvProvided and jobDescriptionsProvided are true in state.
+Rules for diagnosis: leave bottleneck as "" unless it is genuinely earned (see THE HARD REASONING MODEL above). "reasoning" is a short array of specific evidence bullets for that diagnosis — not generic restatement of the signal. The server independently requires ALL of: your diagnosis is actually about a hypothesis that reached "supported"/"confirmed" status this turn (a disconnected diagnosis is rejected even if you set feedback_mode to "diagnosis"); at least 2 hypotheses are currently tracked (a single unopposed idea is never enough — competing explanations must have actually been considered); and a CV/resume/ATS-worded diagnosis additionally requires both cvProvided and jobDescriptionsProvided to be true in state. So don't bother proposing a lone hypothesis and calling it a diagnosis — track at least one real alternative before claiming the stronger finding.
 
 Rules for feedback_mode — this is what the backend uses to decide what kind of feedback control (if any) to show the user, so answer honestly, not optimistically:
 - "none" — an ordinary clarifying/investigating turn. No meaningful signal or diagnosis this turn.
@@ -503,6 +543,8 @@ const SAFE_DEFAULTS = {
     jobDescriptionsProvided: false,
     sameCvForEveryApplication: null,
     employmentStatus: "",
+    uniqueOpportunityCount: null,
+    uniqueCompanyCount: null,
     recentInterviewOutcomes: [],
   },
   signal: "",
@@ -667,6 +709,8 @@ function extractNonEmptyUpdates(factsUpdate) {
   if (factsUpdate.jobDescriptionsProvided === true) updates.jobDescriptionsProvided = true;
   if (factsUpdate.sameCvForEveryApplication != null) updates.sameCvForEveryApplication = factsUpdate.sameCvForEveryApplication;
   if (factsUpdate.employmentStatus) updates.employmentStatus = factsUpdate.employmentStatus;
+  if (factsUpdate.uniqueOpportunityCount != null) updates.uniqueOpportunityCount = factsUpdate.uniqueOpportunityCount;
+  if (factsUpdate.uniqueCompanyCount != null) updates.uniqueCompanyCount = factsUpdate.uniqueCompanyCount;
   if (Array.isArray(factsUpdate.recentInterviewOutcomes) && factsUpdate.recentInterviewOutcomes.length > 0) {
     updates.recentInterviewOutcomes = factsUpdate.recentInterviewOutcomes.slice(0, 5);
   }
@@ -794,6 +838,12 @@ function computeDiagnosisEligibility(state, diagnosis) {
   const qualifying = hypotheses.filter((h) => h.status === "supported" || h.status === "confirmed");
   if (qualifying.length === 0) return false;
 
+  // "Primary bottleneck" requires that competing explanations were actually
+  // investigated, not just that one hypothesis happened to look good in
+  // isolation — require at least 2 tracked hypotheses so a single
+  // unopposed idea can never become a diagnosis on its own.
+  if (hypotheses.length < 2) return false;
+
   if (diagnosis?.bottleneck) {
     // Loose word-overlap check that the diagnosis is actually ABOUT one of
     // the qualifying hypotheses — exact semantic matching isn't possible
@@ -901,8 +951,20 @@ export async function POST(request) {
     let searchContext = "";
     if (userId) {
       try {
+        // ensureSearchState returns the state exactly as it was left after
+        // the PREVIOUS turn (this turn hasn't written anything yet), so its
+        // updatedAt is already the right "last seen" timestamp — no extra
+        // read needed.
         searchState = await ensureSearchState(userId);
         searchContext = buildSearchContext(searchState);
+
+        // A simple, best-effort "did they come back" signal — a gap of 6+
+        // hours since the last turn. Validation signal only, never blocks
+        // the actual turn.
+        const RETURN_GAP_MS = 6 * 60 * 60 * 1000;
+        if (searchState.updatedAt && Date.now() - searchState.updatedAt > RETURN_GAP_MS) {
+          logEvent(userId, "user_returned", { gapHours: Math.round((Date.now() - searchState.updatedAt) / 3600000) });
+        }
       } catch (memErr) {
         console.error("[chat] search state load failed, continuing without it:", memErr?.message);
       }
@@ -968,6 +1030,7 @@ export async function POST(request) {
         const updates = extractNonEmptyUpdates(structured.facts_update);
         if (Object.keys(updates).length > 0) {
           searchState = await updateSearchState(userId, updates);
+          logEvent(userId, "evidence_provided", { fields: Object.keys(updates) });
         }
 
         verifiedStats = computeVerifiedStats(searchState);
@@ -999,12 +1062,16 @@ export async function POST(request) {
           });
         }
         structured = { ...structured, feedback_mode: finalFeedbackMode };
+        if (finalFeedbackMode === "signal") {
+          logEvent(userId, "useful_finding_produced", { insight: (structured.insight || structured.signal || "").slice(0, 160) });
+        }
 
         if (finalFeedbackMode === "diagnosis" && structured.diagnosis?.bottleneck) {
           // Only an earned diagnosis is persisted as "the" diagnosis — this is
           // what future turns see as "previously earned diagnosis" and are
           // explicitly told they may revise or retract.
           searchState = await updateSearchState(userId, { diagnosis: structured.diagnosis });
+          logEvent(userId, "investigation_completed", { bottleneck: structured.diagnosis.bottleneck });
         } else {
           // Never let an unearned diagnosis object reach the client.
           structured = { ...structured, diagnosis: { bottleneck: "", confidence: "low", reasoning: [] } };
