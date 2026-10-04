@@ -1020,7 +1020,11 @@ export async function POST(request) {
       usedFallback = result.usedFallback;
     } catch (firstErr) {
       lastErrorCode = firstErr.code || "SERVER_ERROR";
-      if (lastErrorCode === "RATE_LIMIT" || lastErrorCode === "PROVIDER_TIMEOUT") {
+      // SERVER_ERROR (a bare 5xx from either provider) is just as likely to
+      // be transient as a rate limit or timeout — it was previously
+      // excluded from the auto-retry, so a single hiccup from either
+      // provider failed the whole turn with no retry at all.
+      if (lastErrorCode === "RATE_LIMIT" || lastErrorCode === "PROVIDER_TIMEOUT" || lastErrorCode === "SERVER_ERROR") {
         console.log("[chat] transient error, retrying once after 2s:", lastErrorCode);
         await sleep(2000);
         try {
