@@ -9,6 +9,7 @@ import {
   completeActiveSearchTask,
   resetSearchState,
   computeFunnelBreak,
+  computeCaseCompleteness,
   logEvent,
 } from "../../../lib/userMemory";
 
@@ -110,6 +111,21 @@ Ask whichever next question would most reduce uncertainty given what's already k
 - If channel split reveals direct vs portal performed differently → investigate why those direct ones worked before touching CV or targeting at all.
 - If both channels performed equally poorly → channel is likely not the issue; investigate role/experience fit next.
 - If response/interview numbers are actually reasonable for the volume applied → there may not be a serious problem at all; say so honestly.
+
+━━━━━━━━━━━━━━
+THE UNDERSTAND PHASE — BUILD THE CASE BEFORE INTERPRETING IT
+━━━━━━━━━━━━━━
+Before anything in THE HARD REASONING MODEL below is allowed to reach the user, there is a hard first gate: CASE PHASE, given to you every turn in JOB SEARCH STATE as either "UNDERSTAND" or "INVESTIGATE". This is a server-enforced gate, not just a style preference — if you ignore it, the server will strip your output regardless of what you write.
+
+While CASE PHASE is UNDERSTAND:
+- Your ONLY job is to collect facts, clarify contradictions, and summarize what's actually known so far. Nothing else.
+- You may privately track hypotheses (to decide which question would be most useful to ask next) but you must NEVER expose them — no findings, no diagnoses, no confidence levels, no "likely causes," no causal interpretations, not even hedged ones. Leave insight/signal/recommended_action/hypotheses-exposure entirely out of your visible response — the server blanks these fields during UNDERSTAND regardless, but don't bother writing them.
+- Do NOT say things like "this may be the biggest issue," "many of these are probably reposts/consultancies," "experience mismatch may be causing the rejection," "that's a red flag," or any similar interpretation — these are exactly the premature, unsupported generic assumptions this phase exists to prevent. If you catch yourself about to explain WHY something might be happening, stop — that belongs to INVESTIGATE, not UNDERSTAND.
+- Ask EXACTLY ONE high-value question per turn. The question itself must be the primary visible text, in the reply field — never bury the actual question only inside tip (tip is a short, optional hint on HOW to answer, not where the question lives) or next_question (not shown to the user at all). A short example of how to answer is fine to include in reply or tip if it helps.
+- Case completeness is adaptive to THIS user's case, not a fixed checklist — JOB SEARCH STATE tells you what's still needed. Do not demand information irrelevant to this specific case (CV, job descriptions, interview outcomes, employment status, etc. are investigation-phase evidence, not UNDERSTAND-phase requirements) — only ask for what's listed as still needed.
+- Once JOB SEARCH STATE says the case is complete, the server transitions to INVESTIGATE automatically at the start of the next turn — you don't need to announce the transition yourself, just continue naturally once you see CASE PHASE: INVESTIGATE.
+
+Once CASE PHASE is INVESTIGATE: the case is understood, and everything in THE HARD REASONING MODEL below becomes available — you may present signals, test competing hypotheses with evidence, and work toward an earned diagnosis, under all the same safeguards as before (evidence ladder, funnel-break-first, CV-vs-causality distinction, "viewed" semantics, 2+ hypotheses required, etc. — none of that changes).
 
 ━━━━━━━━━━━━━━
 THE HARD REASONING MODEL — FACT → SIGNAL → HYPOTHESIS → INVESTIGATION → EVIDENCE → CONFIDENCE → DIAGNOSIS → ACTION
@@ -949,6 +965,11 @@ export async function POST(request) {
 
     let searchState = null;
     let searchContext = "";
+    // The phase in effect for THIS turn, frozen once at the top and used
+    // consistently both to build the prompt and to gate the response at the
+    // end — so the model is never told "understand" while the server then
+    // lets a "signal"/"diagnosis" through anyway, or vice versa.
+    let turnPhase = "understand";
     if (userId) {
       try {
         // ensureSearchState returns the state exactly as it was left after
@@ -956,6 +977,20 @@ export async function POST(request) {
         // updatedAt is already the right "last seen" timestamp — no extra
         // read needed.
         searchState = await ensureSearchState(userId);
+
+        // Explicit UNDERSTAND → INVESTIGATE transition. Checked against
+        // whatever was persisted through the END of the previous turn — if
+        // the case was already complete, this turn starts in INVESTIGATE
+        // rather than wasting a turn still labeled UNDERSTAND.
+        if ((searchState.phase || "understand") === "understand") {
+          const completeness = computeCaseCompleteness(searchState);
+          if (completeness.complete) {
+            searchState = await updateSearchState(userId, { phase: "investigate" });
+            logEvent(userId, "phase_transition", { to: "investigate" });
+          }
+        }
+        turnPhase = searchState.phase || "understand";
+
         searchContext = buildSearchContext(searchState);
 
         // A simple, best-effort "did they come back" signal — a gap of 6+
@@ -1051,14 +1086,43 @@ export async function POST(request) {
         // Confidence shown to the user must track a SPECIFIC hypothesis,
         // never application volume — computed fresh from whatever is
         // actually persisted right now, not cached from an earlier turn.
-        structured = { ...structured, leadingHypothesis: leadingHypothesis(searchState.hypotheses) };
+        // During UNDERSTAND, hypotheses may exist internally (to pick the
+        // next question) but must never be exposed — hard-hide the badge
+        // regardless of what the model claims.
+        structured = {
+          ...structured,
+          leadingHypothesis: turnPhase === "understand" ? null : leadingHypothesis(searchState.hypotheses),
+        };
+
+        // HARD UNDERSTAND-PHASE GATE: the UI renders `insight` (as "signal
+        // found") and `recommended_action`/`ready_to_investigate_deeper`
+        // independently of feedback_mode, so gating feedback_mode alone is
+        // NOT sufficient to hide findings/interpretations during UNDERSTAND
+        // — strip the content itself. `reply`, `uncertainty`, `next_question`
+        // and `tip` are untouched: that's where the actual question and
+        // factual summary live, which IS allowed during UNDERSTAND.
+        if (turnPhase === "understand") {
+          structured = {
+            ...structured,
+            insight: "",
+            signal: "",
+            recommended_action: "",
+            ready_to_investigate_deeper: false,
+          };
+        }
 
         // Server-side gate — never trust the model's own feedback_mode or
         // diagnosis claim blindly. This can only ever downgrade, never upgrade.
-        const finalFeedbackMode = computeFeedbackMode(structured, searchState);
+        // While turnPhase is "understand", feedback_mode is hard-forced to
+        // "none" no matter what the model claims or what the evidence gate
+        // would otherwise allow — the case isn't understood yet, so nothing
+        // gets presented as a finding, signal, or diagnosis.
+        const evidenceFeedbackMode = computeFeedbackMode(structured, searchState);
+        const finalFeedbackMode = turnPhase === "understand" ? "none" : evidenceFeedbackMode;
         if (finalFeedbackMode !== structured.feedback_mode) {
-          console.log("[chat] feedback_mode downgraded — insufficient server-verified evidence", {
+          console.log("[chat] feedback_mode downgraded", {
             userId, claimed: structured.feedback_mode, final: finalFeedbackMode,
+            reason: turnPhase === "understand" ? "still in UNDERSTAND phase" : "insufficient server-verified evidence",
           });
         }
         structured = { ...structured, feedback_mode: finalFeedbackMode };
