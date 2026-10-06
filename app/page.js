@@ -514,11 +514,21 @@ export default function LifePath() {
     setLoading(true);
     S.set("lp_usage", { ...usage, count: usage.count + 1 });
 
+    // A hard client-side timeout so the UI can never get stuck on
+    // "INVESTIGATING" indefinitely — previously the fetch had no timeout at
+    // all, so if the server ever hung or the connection stalled without a
+    // clean response, there was nothing to make it give up. Set just above
+    // the server's own function-duration budget so the server times out
+    // first in the normal case; this is the last-resort safety net.
+    const controller = new AbortController();
+    const clientTimeout = setTimeout(() => controller.abort(), 60000);
+
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: apiMessages, userId: getUserId() }),
+        signal: controller.signal,
       });
       const data = await res.json();
       if (data.error) throw new Error(data.message || "Connection error. Please retry.");
@@ -529,8 +539,12 @@ export default function LifePath() {
       };
       setMessages(m => [...m, aiMsg]);
     } catch (err) {
-      setMessages(m => [...m, { role: "assistant", content: `⚠️ ${err.message || "Connection error. Please retry."}`, structured: null }]);
+      const message = err?.name === "AbortError"
+        ? "That took too long to respond. Please retry."
+        : (err.message || "Connection error. Please retry.");
+      setMessages(m => [...m, { role: "assistant", content: `⚠️ ${message}`, structured: null }]);
     } finally {
+      clearTimeout(clientTimeout);
       setLoading(false);
       sendingRef.current = false;
     }
