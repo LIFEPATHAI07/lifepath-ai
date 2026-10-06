@@ -1,4 +1,13 @@
 import { NextResponse } from "next/server";
+
+// Explicit Vercel function duration budget. Without this, the platform's
+// default (often as low as 10s) silently kills the function if the provider
+// calls below run long — which produces exactly "stuck on INVESTIGATING" or
+// an untraceable generic failure, because the kill happens outside our own
+// error handling entirely. Sized to comfortably fit the worst case below
+// (two provider attempts + a 2s retry sleep + two more attempts, each
+// individually bounded — see PROVIDER_TIMEOUT_MS).
+export const maxDuration = 55;
 import {
   ensureSearchState,
   getSearchState,
@@ -296,6 +305,12 @@ GIVE VALUE EARLY — DON'T INTERROGATE ENDLESSLY
 ━━━━━━━━━━━━━━
 The moment the evidence supports ONE real, honest insight — even a small one — say it. A user should be able to leave after 3-4 exchanges and feel it was worth their time. After giving an insight, ask permission before digging deeper.
 
+Six different things, never collapsed into one another: useful observation → signal → hypothesis → supported finding → diagnosis → action. The strength of what you say must always match which of these you've actually reached — reaching INVESTIGATE phase does NOT mean you now owe the user a diagnosis; it means you're now ALLOWED to reason toward one once the evidence earns it, nothing more. "FACT → DIAGNOSIS" in one jump, just because the user wants an answer, is exactly what THE HARD REASONING MODEL above exists to prevent. Equally, do not withhold a genuinely useful observation while waiting for a diagnosis to become possible — give the strongest honest statement the current evidence actually supports, every turn:
+- Early on, with only a raw number: "500 applications tells us the search has had real volume, but not yet why you're not hearing back — I want to find where it's breaking before assuming a cause." Useful, not a diagnosis.
+- Once the funnel break is located and a hypothesis is live but not yet earned: "the search is breaking before the interview stage; [X] is worth investigating, but we can't yet say it caused the rejections." A finding plus honest uncertainty — not a diagnosis.
+- Only once a hypothesis has genuinely reached "supported"/"confirmed" with competing explanations weighed: the real diagnosis, stated plainly with its evidence and its limits (it shows a repeated pattern, it doesn't prove why any individual employer decided what they decided).
+Never go backward and re-ask something already clearly established just because a new message arrived — if the funnel is already clearly breaking at interview→offer, don't circle back to asking about total application volume unless it's actually still needed for the hypothesis in front of you.
+
 ━━━━━━━━━━━━━━
 RECOMMENDATION STYLE
 ━━━━━━━━━━━━━━
@@ -382,7 +397,37 @@ ${INVESTIGATION_PROMPT}`;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const callGemini = async (systemPrompt, messages) => {
+// Per-provider-call hard timeout. This is the actual fix for "stuck on
+// INVESTIGATING": previously NEITHER provider fetch had any timeout at all,
+// so a slow (not erroring) response was bounded only by Vercel's own opaque
+// platform-level function timeout — which silently kills the whole request
+// outside our error handling, producing exactly this symptom. Now a slow
+// provider deterministically fails fast, inside our own code, with a clean
+// loggable error instead.
+const PROVIDER_TIMEOUT_MS = 10000;
+
+async function fetchWithTimeout(url, options, timeoutMs, { requestId, provider, stage }) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const startedAt = Date.now();
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (err) {
+    const elapsed = Date.now() - startedAt;
+    if (err?.name === "AbortError") {
+      console.error("[chat] provider call timed out", { requestId, provider, stage, elapsedMs: elapsed, timeoutMs });
+      const timeoutErr = new Error(`${provider} timed out after ${elapsed}ms`);
+      timeoutErr.code = "PROVIDER_TIMEOUT";
+      throw timeoutErr;
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const callGemini = async (systemPrompt, messages, ctx = {}) => {
+  const { requestId, stage = "gemini", attempt = 1 } = ctx;
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     const err = new Error("No Gemini key");
@@ -392,7 +437,7 @@ const callGemini = async (systemPrompt, messages) => {
 
   let res;
   try {
-    res = await fetch(
+    res = await fetchWithTimeout(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`,
       {
         method: "POST",
@@ -405,10 +450,13 @@ const callGemini = async (systemPrompt, messages) => {
           })),
           generationConfig: { maxOutputTokens: 2600, temperature: 0.7 },
         }),
-      }
+      },
+      PROVIDER_TIMEOUT_MS,
+      { requestId, provider: "gemini", stage }
     );
   } catch (networkErr) {
-    console.error("[chat] provider failed", { provider: "gemini", status: null, statusText: null, body: null, message: networkErr?.message });
+    if (networkErr.code === "PROVIDER_TIMEOUT") throw networkErr; // already logged in fetchWithTimeout
+    console.error("[chat] provider failed", { requestId, provider: "gemini", stage, attempt, status: null, errorCategory: "network", message: networkErr?.message });
     const err = new Error("Gemini network error");
     err.code = "PROVIDER_TIMEOUT";
     throw err;
@@ -417,7 +465,7 @@ const callGemini = async (systemPrompt, messages) => {
   if (!res.ok) {
     let errorBody = "";
     try { errorBody = await res.text(); } catch {}
-    console.error("[chat] provider failed", { provider: "gemini", status: res.status, statusText: res.statusText, body: errorBody.slice(0, 500), message: null });
+    console.error("[chat] provider failed", { requestId, provider: "gemini", stage, attempt, status: res.status, errorCategory: "http", body: errorBody.slice(0, 300) });
 
     if (res.status === 429) { const err = new Error("RATE_LIMITED"); err.code = "RATE_LIMIT"; throw err; }
     if (res.status === 408 || res.status === 504) { const err = new Error("TIMEOUT"); err.code = "PROVIDER_TIMEOUT"; throw err; }
@@ -428,6 +476,7 @@ const callGemini = async (systemPrompt, messages) => {
   const data = await res.json();
   const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!reply) {
+    console.error("[chat] provider returned empty reply", { requestId, provider: "gemini", stage, attempt });
     const err = new Error("Empty Gemini response");
     err.code = "BAD_PROVIDER_RESPONSE";
     throw err;
@@ -435,30 +484,37 @@ const callGemini = async (systemPrompt, messages) => {
   return reply;
 };
 
-const callGroq = async (systemPrompt, messages) => {
+const callGroq = async (systemPrompt, messages, ctx = {}) => {
+  const { requestId, stage = "groq", attempt = 1 } = ctx;
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) { const err = new Error("No Groq key"); err.code = "INVALID_API_KEY"; throw err; }
 
   let res;
   try {
-    res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: "openai/gpt-oss-120b",
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...messages.map(m => ({
-            role: m.role === "assistant" ? "assistant" : "user",
-            content: m.content,
-          })),
-        ],
-        max_tokens: 2600,
-        temperature: 0.7,
-      }),
-    });
+    res = await fetchWithTimeout(
+      "https://api.groq.com/openai/v1/chat/completions",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: "openai/gpt-oss-120b",
+          messages: [
+            { role: "system", content: systemPrompt },
+            ...messages.map(m => ({
+              role: m.role === "assistant" ? "assistant" : "user",
+              content: m.content,
+            })),
+          ],
+          max_tokens: 2600,
+          temperature: 0.7,
+        }),
+      },
+      PROVIDER_TIMEOUT_MS,
+      { requestId, provider: "groq", stage }
+    );
   } catch (networkErr) {
-    console.error("[chat] provider failed", { provider: "groq", status: null, statusText: null, body: null, message: networkErr?.message });
+    if (networkErr.code === "PROVIDER_TIMEOUT") throw networkErr; // already logged in fetchWithTimeout
+    console.error("[chat] provider failed", { requestId, provider: "groq", stage, attempt, status: null, errorCategory: "network", message: networkErr?.message });
     const err = new Error("Groq network error");
     err.code = "PROVIDER_TIMEOUT";
     throw err;
@@ -467,7 +523,7 @@ const callGroq = async (systemPrompt, messages) => {
   if (!res.ok) {
     let errorBody = "";
     try { errorBody = await res.text(); } catch {}
-    console.error("[chat] provider failed", { provider: "groq", status: res.status, statusText: res.statusText, body: errorBody.slice(0, 500), message: null });
+    console.error("[chat] provider failed", { requestId, provider: "groq", stage, attempt, status: res.status, errorCategory: "http", body: errorBody.slice(0, 300) });
 
     if (res.status === 429) { const err = new Error("RATE_LIMITED"); err.code = "RATE_LIMIT"; throw err; }
     if (res.status === 408 || res.status === 504) { const err = new Error("TIMEOUT"); err.code = "PROVIDER_TIMEOUT"; throw err; }
@@ -478,6 +534,7 @@ const callGroq = async (systemPrompt, messages) => {
   const data = await res.json();
   const reply = data.choices?.[0]?.message?.content;
   if (!reply) {
+    console.error("[chat] provider returned empty reply", { requestId, provider: "groq", stage, attempt });
     const err = new Error("Empty Groq response");
     err.code = "BAD_PROVIDER_RESPONSE";
     throw err;
@@ -708,16 +765,17 @@ const sanitizeStructured = (parsed) => {
   return merged;
 };
 
-const getAiReply = async (systemPrompt, messages) => {
-  console.log("[chat] gemini attempt");
+const getAiReply = async (systemPrompt, messages, ctx = {}) => {
+  const { requestId, attempt = 1 } = ctx;
+  console.log("[chat] gemini attempt", { requestId, attempt });
   try {
-    const rawReply = await callGemini(systemPrompt, messages);
-    console.log("[chat] success", { provider: "gemini" });
+    const rawReply = await callGemini(systemPrompt, messages, { requestId, stage: "gemini_primary", attempt });
+    console.log("[chat] success", { requestId, provider: "gemini", attempt });
     return { rawReply, usedFallback: false };
   } catch (geminiErr) {
-    console.log("[chat] groq fallback attempt");
-    const rawReply = await callGroq(systemPrompt, messages);
-    console.log("[chat] success", { provider: "groq" });
+    console.log("[chat] groq fallback attempt", { requestId, attempt, geminiErrorCode: geminiErr.code });
+    const rawReply = await callGroq(systemPrompt, messages, { requestId, stage: "groq_fallback", attempt });
+    console.log("[chat] success", { requestId, provider: "groq", attempt });
     return { rawReply, usedFallback: true };
   }
 };
@@ -949,7 +1007,13 @@ export async function POST(request) {
       }
     }
 
+    // Traceable across all diagnostic logs for this one request — never
+    // logs message content, prompt text, or API keys, just identifies which
+    // log lines belong together when reading Vercel's function logs.
+    const requestId = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 10);
+
     console.log("[chat] request start", {
+      requestId,
       userId,
       messageCount: messages?.length,
       totalChars: messages?.reduce((sum, m) => sum + (m.content?.length || 0), 0),
@@ -1026,25 +1090,26 @@ export async function POST(request) {
     let lastErrorCode = "SERVER_ERROR";
 
     try {
-      const result = await getAiReply(systemPrompt, messages);
+      const result = await getAiReply(systemPrompt, messages, { requestId, attempt: 1 });
       rawReply = result.rawReply;
       usedFallback = result.usedFallback;
     } catch (firstErr) {
       lastErrorCode = firstErr.code || "SERVER_ERROR";
+      console.error("[chat] first attempt failed", { requestId, code: lastErrorCode, message: firstErr?.message });
       // SERVER_ERROR (a bare 5xx from either provider) is just as likely to
       // be transient as a rate limit or timeout — it was previously
       // excluded from the auto-retry, so a single hiccup from either
       // provider failed the whole turn with no retry at all.
       if (lastErrorCode === "RATE_LIMIT" || lastErrorCode === "PROVIDER_TIMEOUT" || lastErrorCode === "SERVER_ERROR") {
-        console.log("[chat] transient error, retrying once after 2s:", lastErrorCode);
+        console.log("[chat] transient error, retrying once after 2s", { requestId, code: lastErrorCode });
         await sleep(2000);
         try {
-          const retryResult = await getAiReply(systemPrompt, messages);
+          const retryResult = await getAiReply(systemPrompt, messages, { requestId, attempt: 2 });
           rawReply = retryResult.rawReply;
           usedFallback = retryResult.usedFallback;
         } catch (secondErr) {
           lastErrorCode = secondErr.code || "SERVER_ERROR";
-          console.error("[chat] retry also failed", { code: lastErrorCode, message: secondErr?.message });
+          console.error("[chat] retry also failed", { requestId, code: lastErrorCode, message: secondErr?.message });
         }
       }
     }
@@ -1057,8 +1122,9 @@ export async function POST(request) {
         BAD_PROVIDER_RESPONSE: "The AI service gave an unexpected response. Please retry.",
         SERVER_ERROR: "The AI service had a problem. Please retry in a moment.",
       };
+      console.error("[chat] request failed, returning error to client", { requestId, finalCode: lastErrorCode });
       return NextResponse.json(
-        { error: true, code: lastErrorCode, message: messagesByCode[lastErrorCode] || messagesByCode.SERVER_ERROR },
+        { error: true, code: lastErrorCode, message: messagesByCode[lastErrorCode] || messagesByCode.SERVER_ERROR, requestId },
         { status: lastErrorCode === "RATE_LIMIT" ? 429 : 503 }
       );
     }
