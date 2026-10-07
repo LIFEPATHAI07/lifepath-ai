@@ -1,12 +1,25 @@
 import { NextResponse } from "next/server";
 
 // Explicit Vercel function duration budget. Without this, the platform's
-// default (often as low as 10s) silently kills the function if the provider
-// calls below run long — which produces exactly "stuck on INVESTIGATING" or
-// an untraceable generic failure, because the kill happens outside our own
-// error handling entirely. Sized to comfortably fit the worst case below
-// (two provider attempts + a 2s retry sleep + two more attempts, each
-// individually bounded — see PROVIDER_TIMEOUT_MS).
+// default (often as low as 10s) silently kills the function if any call
+// below runs long — which produces exactly "stuck on INVESTIGATING" or an
+// untraceable generic failure, because the kill happens outside our own
+// error handling entirely.
+//
+// Every blocking stage in the request (both Firestore and provider calls)
+// is now individually timeout-bounded — see PROVIDER_TIMEOUT_MS and
+// FIRESTORE_TIMEOUT_MS below. Absolute worst case, every conditional stage
+// firing AND every single one timing out: state_load(3s) +
+// phase_transition_persist(3s) + gemini(9s) + groq_fallback(9s) +
+// retry_sleep(2s) + groq_retry(9s) + facts_persist(3s) +
+// hypotheses_persist(3s) + diagnosis_persist(3s) = 44s, leaving ~11s of
+// headroom under this 55s budget. (fact_log/task_set are fire-and-forget,
+// not in this critical path — see fireAndForget below.)
+//
+// IMPORTANT: confirm your Vercel plan actually honors maxDuration=55 for
+// this route (Hobby plans have historically capped lower than Pro) — if
+// your plan silently ignores or caps this, Vercel's own platform default
+// still applies underneath whatever this says.
 export const maxDuration = 55;
 import {
   ensureSearchState,
@@ -404,7 +417,45 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // outside our error handling, producing exactly this symptom. Now a slow
 // provider deterministically fails fast, inside our own code, with a clean
 // loggable error instead.
-const PROVIDER_TIMEOUT_MS = 10000;
+const PROVIDER_TIMEOUT_MS = 9000;
+
+// Firestore calls (ensureSearchState/updateSearchState/etc.) had ZERO
+// timeout protection — unlike the provider fetch calls above, a slow or
+// hanging Firestore call here was bounded by nothing at all. This is a
+// genuine, code-provable gap (not a guess about what's failing live): the
+// existing try/catch around state loading only helps if Firestore actually
+// throws — it does nothing if the call simply never resolves. Promise.race
+// doesn't cancel the underlying Firestore call, it just stops the request
+// from waiting on it — safe, since these are idempotent read/update
+// operations. 3s is generous — Firestore reads/writes are normally well
+// under 500ms — but kept tight because this budget is summed across up to
+// 5 blocking stages in the worst case (see maxDuration comment above). The
+// two lowest-stakes writes (fact_log, task_set) are NOT wrapped with this —
+// they're fire-and-forget instead, since losing one bookkeeping entry is
+// far cheaper than making the user wait on it.
+const FIRESTORE_TIMEOUT_MS = 3000;
+
+function withTimeout(promise, timeoutMs, stage, requestId) {
+  let timer;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      console.error("[chat] state operation timed out", { requestId, stage, timeoutMs });
+      const err = new Error(`${stage} timed out after ${timeoutMs}ms`);
+      err.code = "STATE_TIMEOUT";
+      reject(err);
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timer));
+}
+
+// For bookkeeping writes that must NEVER block the user's response (same
+// category as logEvent): fire it, log if it eventually fails, but don't
+// make the request wait on it either way.
+function fireAndForget(promise, stage, requestId) {
+  promise.catch((err) => {
+    console.error("[chat] background write failed (non-blocking)", { requestId, stage, message: err?.message });
+  });
+}
 
 async function fetchWithTimeout(url, options, timeoutMs, { requestId, provider, stage }) {
   const controller = new AbortController();
@@ -972,14 +1023,23 @@ function computeFeedbackMode(structured, state) {
 }
 
 export async function POST(request) {
+  // Hoisted OUTSIDE the try block on purpose: a `const`/`let` declared
+  // inside a try is NOT visible inside its own catch block (JS block
+  // scoping) — requestId was previously declared inside the try, which
+  // meant the one catch-all for truly unexpected exceptions had no request
+  // ID to log or return, directly breaking "every failure is traceable."
+  let requestId = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 10);
+  const requestStartedAt = Date.now();
+  const elapsed = () => Date.now() - requestStartedAt;
+
   try {
     let body;
     try {
       body = await request.json();
     } catch (err) {
-      console.error("[chat] body parse failed", err?.message);
+      console.error("[chat] body parse failed", { requestId, stage: "body_parse", message: err?.message, elapsedMs: elapsed() });
       return NextResponse.json(
-        { error: true, code: "INVALID_REQUEST", message: "Malformed request." },
+        { error: true, code: "INVALID_REQUEST", message: "Malformed request.", requestId },
         { status: 400 }
       );
     }
@@ -990,27 +1050,22 @@ export async function POST(request) {
     if (action === "clear_search") {
       if (!userId) {
         return NextResponse.json(
-          { error: true, code: "INVALID_REQUEST", message: "userId required to reset." },
+          { error: true, code: "INVALID_REQUEST", message: "userId required to reset.", requestId },
           { status: 400 }
         );
       }
       try {
-        await resetSearchState(userId);
-        console.log("[chat] search state reset", { userId });
+        await withTimeout(resetSearchState(userId), FIRESTORE_TIMEOUT_MS, "reset_search_state", requestId);
+        console.log("[chat] search state reset", { requestId, userId, elapsedMs: elapsed() });
         return NextResponse.json({ success: true });
       } catch (err) {
-        console.error("[chat] reset failed:", err?.message);
+        console.error("[chat] reset failed", { requestId, message: err?.message, elapsedMs: elapsed() });
         return NextResponse.json(
-          { error: true, code: "SERVER_ERROR", message: "Could not reset. Please try again." },
+          { error: true, code: "SERVER_ERROR", message: "Could not reset. Please try again.", requestId },
           { status: 500 }
         );
       }
     }
-
-    // Traceable across all diagnostic logs for this one request — never
-    // logs message content, prompt text, or API keys, just identifies which
-    // log lines belong together when reading Vercel's function logs.
-    const requestId = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 10);
 
     console.log("[chat] request start", {
       requestId,
@@ -1021,7 +1076,7 @@ export async function POST(request) {
 
     if (!messages?.length) {
       return NextResponse.json(
-        { error: true, code: "INVALID_REQUEST", message: "Messages required." },
+        { error: true, code: "INVALID_REQUEST", message: "Messages required.", requestId },
         { status: 400 }
       );
     }
@@ -1031,7 +1086,7 @@ export async function POST(request) {
 
     if (!latestMsg) {
       return NextResponse.json(
-        { error: true, code: "INVALID_REQUEST", message: "Invalid message." },
+        { error: true, code: "INVALID_REQUEST", message: "Invalid message.", requestId },
         { status: 400 }
       );
     }
@@ -1051,7 +1106,8 @@ export async function POST(request) {
         // the PREVIOUS turn (this turn hasn't written anything yet), so its
         // updatedAt is already the right "last seen" timestamp — no extra
         // read needed.
-        searchState = await ensureSearchState(userId);
+        searchState = await withTimeout(ensureSearchState(userId), FIRESTORE_TIMEOUT_MS, "state_load", requestId);
+        console.log("[chat] state loaded", { requestId, elapsedMs: elapsed() });
 
         // Explicit UNDERSTAND → INVESTIGATE transition. Checked against
         // whatever was persisted through the END of the previous turn — if
@@ -1060,7 +1116,7 @@ export async function POST(request) {
         if ((searchState.phase || "understand") === "understand") {
           const completeness = computeCaseCompleteness(searchState);
           if (completeness.complete) {
-            searchState = await updateSearchState(userId, { phase: "investigate" });
+            searchState = await withTimeout(updateSearchState(userId, { phase: "investigate" }), FIRESTORE_TIMEOUT_MS, "phase_transition_persist", requestId);
             logEvent(userId, "phase_transition", { to: "investigate" });
           }
         }
@@ -1076,7 +1132,7 @@ export async function POST(request) {
           logEvent(userId, "user_returned", { gapHours: Math.round((Date.now() - searchState.updatedAt) / 3600000) });
         }
       } catch (memErr) {
-        console.error("[chat] search state load failed, continuing without it:", memErr?.message);
+        console.error("[chat] search state load failed, continuing without it", { requestId, code: memErr?.code, message: memErr?.message, elapsedMs: elapsed() });
       }
     }
 
@@ -1093,9 +1149,10 @@ export async function POST(request) {
       const result = await getAiReply(systemPrompt, messages, { requestId, attempt: 1 });
       rawReply = result.rawReply;
       usedFallback = result.usedFallback;
+      console.log("[chat] provider responded", { requestId, provider: usedFallback ? "groq" : "gemini", elapsedMs: elapsed() });
     } catch (firstErr) {
       lastErrorCode = firstErr.code || "SERVER_ERROR";
-      console.error("[chat] first attempt failed", { requestId, code: lastErrorCode, message: firstErr?.message });
+      console.error("[chat] first attempt failed", { requestId, code: lastErrorCode, message: firstErr?.message, elapsedMs: elapsed() });
       // SERVER_ERROR (a bare 5xx from either provider) is just as likely to
       // be transient as a rate limit or timeout — it was previously
       // excluded from the auto-retry, so a single hiccup from either
@@ -1104,12 +1161,18 @@ export async function POST(request) {
         console.log("[chat] transient error, retrying once after 2s", { requestId, code: lastErrorCode });
         await sleep(2000);
         try {
-          const retryResult = await getAiReply(systemPrompt, messages, { requestId, attempt: 2 });
-          rawReply = retryResult.rawReply;
-          usedFallback = retryResult.usedFallback;
+          // Retry hits Groq directly, NOT the full gemini-then-groq cascade
+          // again — if Gemini just failed, re-trying it immediately is
+          // unlikely to help and doubles the worst-case latency for no real
+          // benefit. A single call to a different provider is both faster
+          // and still genuine provider diversity on the retry.
+          const retryReply = await callGroq(systemPrompt, messages, { requestId, stage: "groq_retry", attempt: 2 });
+          rawReply = retryReply;
+          usedFallback = true;
+          console.log("[chat] provider responded on retry", { requestId, provider: "groq", elapsedMs: elapsed() });
         } catch (secondErr) {
           lastErrorCode = secondErr.code || "SERVER_ERROR";
-          console.error("[chat] retry also failed", { requestId, code: lastErrorCode, message: secondErr?.message });
+          console.error("[chat] retry also failed", { requestId, code: lastErrorCode, message: secondErr?.message, elapsedMs: elapsed() });
         }
       }
     }
@@ -1122,7 +1185,7 @@ export async function POST(request) {
         BAD_PROVIDER_RESPONSE: "The AI service gave an unexpected response. Please retry.",
         SERVER_ERROR: "The AI service had a problem. Please retry in a moment.",
       };
-      console.error("[chat] request failed, returning error to client", { requestId, finalCode: lastErrorCode });
+      console.error("[chat] request failed, returning error to client", { requestId, finalCode: lastErrorCode, elapsedMs: elapsed() });
       return NextResponse.json(
         { error: true, code: lastErrorCode, message: messagesByCode[lastErrorCode] || messagesByCode.SERVER_ERROR, requestId },
         { status: lastErrorCode === "RATE_LIMIT" ? 429 : 503 }
@@ -1131,9 +1194,9 @@ export async function POST(request) {
 
     const parsed = parseJSON(rawReply);
     if (!parsed) {
-      console.error("[chat] validation error: AI response was not valid JSON. Raw:", rawReply?.slice(0, 300));
+      console.error("[chat] validation error: AI response was not valid JSON", { requestId, stage: "parse", elapsedMs: elapsed(), rawPreview: rawReply?.slice(0, 300) });
       return NextResponse.json(
-        { error: true, code: "BAD_PROVIDER_RESPONSE", message: "Could not understand the AI response. Please retry." },
+        { error: true, code: "BAD_PROVIDER_RESPONSE", message: "Could not understand the AI response. Please retry.", requestId },
         { status: 502 }
       );
     }
@@ -1145,7 +1208,7 @@ export async function POST(request) {
       try {
         const updates = extractNonEmptyUpdates(structured.facts_update);
         if (Object.keys(updates).length > 0) {
-          searchState = await updateSearchState(userId, updates);
+          searchState = await withTimeout(updateSearchState(userId, updates), FIRESTORE_TIMEOUT_MS, "facts_persist", requestId);
           logEvent(userId, "evidence_provided", { fields: Object.keys(updates) });
         }
 
@@ -1161,7 +1224,7 @@ export async function POST(request) {
         // reasoning state actually accumulates across turns (this is the
         // "intelligence layer" — not just chat text).
         if (Array.isArray(structured.hypotheses) && structured.hypotheses.length > 0) {
-          searchState = await updateSearchState(userId, { hypotheses: structured.hypotheses });
+          searchState = await withTimeout(updateSearchState(userId, { hypotheses: structured.hypotheses }), FIRESTORE_TIMEOUT_MS, "hypotheses_persist", requestId);
         }
 
         // Confidence shown to the user must track a SPECIFIC hypothesis,
@@ -1215,22 +1278,26 @@ export async function POST(request) {
           // Only an earned diagnosis is persisted as "the" diagnosis — this is
           // what future turns see as "previously earned diagnosis" and are
           // explicitly told they may revise or retract.
-          searchState = await updateSearchState(userId, { diagnosis: structured.diagnosis });
+          searchState = await withTimeout(updateSearchState(userId, { diagnosis: structured.diagnosis }), FIRESTORE_TIMEOUT_MS, "diagnosis_persist", requestId);
           logEvent(userId, "investigation_completed", { bottleneck: structured.diagnosis.bottleneck });
         } else {
           // Never let an unearned diagnosis object reach the client.
           structured = { ...structured, diagnosis: { bottleneck: "", confidence: "low", reasoning: [] } };
         }
 
+        // Bookkeeping only — never block the response on these. Losing one
+        // fact-log/active-task entry on a rare Firestore hiccup is low
+        // stakes; making the user wait on it (or fail their whole turn
+        // because of it) is not an acceptable trade.
         if (structured.insight) {
-          await addSearchFact(userId, structured.insight);
+          fireAndForget(addSearchFact(userId, structured.insight), "fact_log", requestId);
         }
-
         if (structured.recommended_action) {
-          await setActiveSearchTask(userId, structured.recommended_action);
+          fireAndForget(setActiveSearchTask(userId, structured.recommended_action), "task_set", requestId);
         }
+        console.log("[chat] state persisted", { requestId, elapsedMs: elapsed() });
       } catch (err) {
-        console.error("[chat] search state update failed (non-fatal):", err?.message);
+        console.error("[chat] search state update failed (non-fatal)", { requestId, code: err?.code, message: err?.message, elapsedMs: elapsed() });
       }
     } else {
       // No userId at all means no persisted evidence to verify against —
@@ -1243,17 +1310,26 @@ export async function POST(request) {
       };
     }
 
+    console.log("[chat] request complete", { requestId, elapsedMs: elapsed(), engine: usedFallback ? "groq" : "gemini" });
     return NextResponse.json({
       structured,
       verified_stats: verifiedStats,
       language,
       engine: usedFallback ? "groq" : "gemini",
+      requestId,
     });
   } catch (error) {
-    console.error("[chat] full error:", error);
-    console.error("[chat] stack:", error instanceof Error ? error.stack : "No stack");
+    // The one true catch-all for anything not already handled above —
+    // requestId is now declared OUTSIDE this try (see top of function), so
+    // it's guaranteed to be available here even for a totally unexpected
+    // exception. Never logs message content or secrets — only the error's
+    // own message/stack and the request metadata.
+    console.error("[chat] unhandled error", {
+      requestId, code: error?.code, message: error?.message, elapsedMs: elapsed(),
+      stack: error instanceof Error ? error.stack?.slice(0, 1000) : "no stack",
+    });
     return NextResponse.json(
-      { error: true, code: "SERVER_ERROR", message: error.message || "Server error." },
+      { error: true, code: error?.code || "SERVER_ERROR", message: `Request failed. Reference: ${requestId}`, requestId },
       { status: 500 }
     );
   }
