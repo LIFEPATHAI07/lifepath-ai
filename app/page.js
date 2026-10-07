@@ -531,7 +531,11 @@ export default function LifePath() {
         signal: controller.signal,
       });
       const data = await res.json();
-      if (data.error) throw new Error(data.message || "Connection error. Please retry.");
+      if (data.error) {
+        const serverErr = new Error(data.message || "Connection error. Please retry.");
+        serverErr.requestId = data.requestId || null;
+        throw serverErr;
+      }
 
       const aiMsg = {
         role: "assistant",
@@ -539,9 +543,19 @@ export default function LifePath() {
       };
       setMessages(m => [...m, aiMsg]);
     } catch (err) {
-      const message = err?.name === "AbortError"
-        ? "That took too long to respond. Please retry."
-        : (err.message || "Connection error. Please retry.");
+      // Every failure should be traceable — show the reference ID whenever
+      // the server actually returned one. An AbortError means the client
+      // gave up before any response arrived at all, so there's genuinely no
+      // ID to show; say so plainly instead of fabricating one.
+      let message;
+      if (err?.name === "AbortError") {
+        message = "That took too long to respond. Please retry.";
+      } else {
+        message = err.message || "Connection error. Please retry.";
+        if (err?.requestId && !message.includes(err.requestId)) {
+          message += ` (Ref: ${err.requestId})`;
+        }
+      }
       setMessages(m => [...m, { role: "assistant", content: `⚠️ ${message}`, structured: null }]);
     } finally {
       clearTimeout(clientTimeout);
