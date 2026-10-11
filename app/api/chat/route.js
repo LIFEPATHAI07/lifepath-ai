@@ -1,26 +1,4 @@
 import { NextResponse } from "next/server";
-
-// Explicit Vercel function duration budget. Without this, the platform's
-// default (often as low as 10s) silently kills the function if any call
-// below runs long — which produces exactly "stuck on INVESTIGATING" or an
-// untraceable generic failure, because the kill happens outside our own
-// error handling entirely.
-//
-// Every blocking stage in the request (both Firestore and provider calls)
-// is now individually timeout-bounded — see PROVIDER_TIMEOUT_MS and
-// FIRESTORE_TIMEOUT_MS below. Absolute worst case, every conditional stage
-// firing AND every single one timing out: state_load(3s) +
-// phase_transition_persist(3s) + gemini(9s) + groq_fallback(9s) +
-// retry_sleep(2s) + groq_retry(9s) + facts_persist(3s) +
-// hypotheses_persist(3s) + diagnosis_persist(3s) = 44s, leaving ~11s of
-// headroom under this 55s budget. (fact_log/task_set are fire-and-forget,
-// not in this critical path — see fireAndForget below.)
-//
-// IMPORTANT: confirm your Vercel plan actually honors maxDuration=55 for
-// this route (Hobby plans have historically capped lower than Pro) — if
-// your plan silently ignores or caps this, Vercel's own platform default
-// still applies underneath whatever this says.
-export const maxDuration = 55;
 import {
   ensureSearchState,
   getSearchState,
@@ -34,6 +12,28 @@ import {
   computeCaseCompleteness,
   logEvent,
 } from "../../../lib/userMemory";
+
+// Explicit Vercel function duration budget. Without this, the platform's
+// default (often as low as 10s) silently kills the function if any call
+// below runs long — which produces exactly "stuck on INVESTIGATING" or an
+// untraceable generic failure, because the kill happens outside our own
+// error handling entirely.
+//
+// Every blocking stage in the request (both Firestore and provider calls)
+// is individually timeout-bounded — see PROVIDER_TIMEOUT_MS and
+// FIRESTORE_TIMEOUT_MS below. Absolute worst case, every conditional stage
+// firing AND every single one timing out: state_load(3s) +
+// phase_transition_persist(3s) + gemini(9s) + groq_fallback(9s) +
+// retry_sleep(2s) + groq_retry(9s) + facts_persist(3s) +
+// hypotheses_persist(3s) + diagnosis_persist(3s) = 44s, leaving ~11s of
+// headroom under this 55s budget. (fact_log/task_set are fire-and-forget,
+// not in this critical path — see fireAndForget below.)
+//
+// IMPORTANT: confirm your Vercel plan actually honors maxDuration=55 for
+// this route (Hobby plans have historically capped lower than Pro) — if
+// your plan silently ignores or caps this, Vercel's own platform default
+// still applies underneath whatever this says.
+export const maxDuration = 55;
 
 const detectLanguage = (text) => {
   if (/[\u0D00-\u0D7F]/.test(text)) return "malayalam";
@@ -904,18 +904,18 @@ function computeSampleSize(state) {
 // The one thing that's actually allowed to look like "we're onto
 // something": pick the single strongest currently-tracked hypothesis (by
 // status, then confidence) so the UI can show confidence in THAT specific
-// claim — never a generic, volume-derived number.
-const HYPOTHESIS_STATUS_RANK = { untested: 0, investigating: 1, weak: 1, plausible: 2, supported: 3, confirmed: 4 };
-const HYPOTHESIS_CONFIDENCE_RANK = { low: 0, medium: 1, high: 2 };
+// claim — never a generic, volume-derived number. Reuses STATUS_RANK /
+// CONFIDENCE_RANK defined above (enforceHypothesisEvidenceLadder) rather
+// than a second copy of the same table.
 function leadingHypothesis(hypotheses) {
   if (!Array.isArray(hypotheses) || hypotheses.length === 0) return null;
   let best = null;
   for (const h of hypotheses) {
     if (!h?.label) continue;
     if (!best) { best = h; continue; }
-    const statusDelta = (HYPOTHESIS_STATUS_RANK[h.status] ?? 0) - (HYPOTHESIS_STATUS_RANK[best.status] ?? 0);
+    const statusDelta = (STATUS_RANK[h.status] ?? 0) - (STATUS_RANK[best.status] ?? 0);
     if (statusDelta > 0) { best = h; continue; }
-    if (statusDelta === 0 && (HYPOTHESIS_CONFIDENCE_RANK[h.confidence] ?? 0) > (HYPOTHESIS_CONFIDENCE_RANK[best.confidence] ?? 0)) {
+    if (statusDelta === 0 && (CONFIDENCE_RANK[h.confidence] ?? 0) > (CONFIDENCE_RANK[best.confidence] ?? 0)) {
       best = h;
     }
   }
@@ -1033,6 +1033,21 @@ export async function POST(request) {
   const elapsed = () => Date.now() - requestStartedAt;
 
   try {
+    // Validate configuration before doing any real work. Previously this
+    // was only discovered lazily — deep inside callGemini/callGroq, after
+    // state had already been loaded and the prompt built — which wastes a
+    // full request cycle before telling the caller the deployment itself
+    // is misconfigured. If NEITHER provider has a key, there is no way
+    // this request can ever succeed; fail fast with a distinct, honest
+    // error instead of letting it look like a transient provider failure.
+    if (!process.env.GEMINI_API_KEY && !process.env.GROQ_API_KEY) {
+      console.error("[chat] no provider API keys configured", { requestId });
+      return NextResponse.json(
+        { error: true, code: "INVALID_API_KEY", message: "The AI service is not configured. Please contact support.", requestId },
+        { status: 500 }
+      );
+    }
+
     let body;
     try {
       body = await request.json();
