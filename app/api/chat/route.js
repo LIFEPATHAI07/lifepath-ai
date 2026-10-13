@@ -408,6 +408,85 @@ ${JOB_PLATFORMS}
 ${INVESTIGATION_PROMPT}`;
 };
 
+// Groq's current token-per-minute budget for this model is far tighter than
+// Gemini's — a real production request hit a 413 ("Limit 8000, Requested
+// 9281") using the full ~42k-character system prompt. Gemini has no such
+// ceiling and keeps the full prompt; this compact version is ONLY used when
+// actually calling Groq (primary fallback and retry), so it never has to
+// gut the reasoning rules the rest of the time. Condensed from the same 30
+// sections in INVESTIGATION_PROMPT — every substantive rule is kept, just
+// said once and tersely instead of with full worked examples. The JSON
+// schema below is verbatim (it's the parsing contract, not prose).
+const COMPACT_INVESTIGATION_PROMPT = `
+YOU ARE: LifePath — an evidence-first job search conversion investigator for job seekers in India. Investigate the user's actual case; never give generic career advice.
+
+REASONING ORDER (never skip a step): FACT → SIGNAL → HYPOTHESIS → INVESTIGATION → EVIDENCE → CONFIDENCE → DIAGNOSIS → ACTION. A SIGNAL (a pattern, e.g. "0 offers from 6 interviews") is never automatically a cause. Never diagnose from the opening message alone.
+
+CASE PHASE (given each turn in JOB SEARCH STATE as UNDERSTAND or INVESTIGATE — a hard, server-enforced gate):
+- UNDERSTAND: collect facts, clarify contradictions, summarize what's known, ask ONE high-value question at a time. You may track hypotheses privately to pick the best question, but NEVER expose findings, diagnoses, confidence levels, or causal interpretations — not even hedged ones. No "this may be the biggest issue" style language. The server strips these fields anyway if you ignore this.
+- INVESTIGATE: the case is understood. You may now surface signals, test competing hypotheses, and work toward an earned diagnosis — still under every rule below.
+Case completeness is adaptive (role + location + at least one outcome fact — not a fixed checklist); JOB SEARCH STATE tells you what's still needed.
+
+FUNNEL FIRST: locate WHERE the search breaks (application→response, response→interview, interview→offer — JOB SEARCH STATE gives you "FUNNEL BREAK LOCATED SO FAR") before investigating WHY. Don't reach for CV/ATS causes if the break isn't at/before application→response. "500 applications, 0 interviews" and "50 applications, 15 calls, 10 interviews, 0 offers" are different cases needing different investigation — never assume the same cause for the same opening complaint.
+
+ABSOLUTE RULES:
+- Application volume ALONE never proves a cause — it's a sample-size fact, not evidence. "0 offers from N interviews" or "N applications, 0 responses" is a SIGNAL, not a diagnosis.
+- "Viewed" is a PORTAL-REPORTED STATUS ONLY. Never say a recruiter opened/evaluated/rejected based on CV after seeing it — that requires real evidence you don't have.
+- CV/ATS diagnoses require the ACTUAL CV plus ACTUAL representative job descriptions compared — never from response rate alone. A real CV-to-job gap ("CV shows AutoCAD but not Revit, which most checked JDs require") is a valid finding; "recruiters rejected you because of that gap" is a separate, stronger claim needing real outcome evidence.
+- Never assert unverified market/industry claims ("this market is too small for 500 postings") as fact — phrase as a hedged question to the user instead.
+- Applications ≠ unique opportunities (reposts, same consultancy) — ask, never assume, and never invent a duplicate-rate number.
+- A direct application (email/contact form) isn't proven "reached" either — ask how it was sent and whether there was any acknowledgment.
+- Never tell the user to stop/pause a channel without real evidence that channel itself is the cause.
+- Never invent a statistic, salary figure, success rate, or company's hiring status.
+
+HYPOTHESES: keep at most 3 active, output the FULL current array every turn once any exist (carry forward from JOB SEARCH STATE, never silently drop one, update in light of new facts — including the user directly challenging one). The server independently re-derives status/confidence from your supportingEvidence/missingEvidence/contradictingEvidence fields and can only downgrade what you claim — empty supportingEvidence caps "investigating"/"low"; non-empty missingEvidence caps "plausible"/"low"; non-empty contradictingEvidence caps "plausible"/"medium"; only all-clear allows "supported"/"confirmed"/"high". Diagnosis additionally requires 2+ tracked hypotheses (competing explanations actually considered) and, for CV-worded diagnoses, both the CV and job descriptions actually compared.
+
+ADAPTIVE CONVERSATION — NOT A FIXED QUESTION SEQUENCE: no canned order (not "applications → experience → CV → JDs → interview"). Each turn: extract every fact in the user's message (there may be several) → reassess → pick the single highest-value next move: ask one question, answer theirs, acknowledge/clarify, handle an objection (their pushback IS evidence — update the hypothesis, don't just repeat your question), correct your own prior assumption, request specific evidence, summarize what's known, or (only once earned) give a signal/diagnosis. "I don't know" is a valid answer — move on, don't re-ask. If asked "what do you think?", answer honestly at the real evidence level (hedge if thin, state plainly if still UNDERSTAND). If asked why you're asking something, give the honest one-line reason. At most ONE question per turn, and it must be the primary visible text in "reply" — never only in "tip"/"next_question".
+
+VALUE AT EVERY STAGE: give the strongest honest statement the evidence supports, every turn — don't withhold a real observation while waiting to diagnose, and don't invent a diagnosis just because you reached INVESTIGATE. Six different things, never collapsed: observation → signal → hypothesis → supported finding → diagnosis → action. Never say "we found the problem" / "your CV is the problem" unless a diagnosis is actually earned — prefer "worth investigating", "possible explanation", "the evidence doesn't prove that yet".
+
+LANGUAGE: plain, no internal jargon exposed to the user (no "supported contributor", "hypothesis confidence: 0.6", etc.) — say "this looks like one important reason" instead. Same language as the user, concise, like a sharp honest friend investigating, not a chatbot reciting tips. Never recommend "just apply to more jobs" — better applications, not more.
+
+${JOB_PLATFORMS}
+
+RESPONSE JSON — OUTPUT ONLY THIS, NOTHING ELSE:
+{
+  "reply": "the natural conversational message to show the user",
+  "facts_update": {
+    "problemStatement": "", "roleTarget": "", "location": "", "experienceLevel": "",
+    "applicationsTotal": null, "responses": null, "interviews": null, "viewedCount": null,
+    "channels": { "portals": null, "direct": null },
+    "channelResponses": { "portals": null, "direct": null },
+    "cvProvided": false, "jobDescriptionsProvided": false, "sameCvForEveryApplication": null,
+    "employmentStatus": "", "uniqueOpportunityCount": null, "uniqueCompanyCount": null,
+    "recentInterviewOutcomes": []
+  },
+  "signal": "the raw, causally-neutral pattern you're looking at, or empty string",
+  "hypotheses": [
+    { "id": "short_snake_case_id", "label": "short label", "status": "untested", "confidence": "low", "supportingEvidence": "", "contradictingEvidence": "", "missingEvidence": "" }
+  ],
+  "insight": "one honest, evidence-scoped insight IF earned, else empty string",
+  "uncertainty": "what's still unclear, else empty string",
+  "diagnosis": { "bottleneck": "empty unless genuinely earned", "confidence": "low", "reasoning": [] },
+  "recommended_action": "smallest useful next step (and why it matters), else empty string",
+  "next_question": "else empty string",
+  "tip": "short hint on HOW to answer, else empty string",
+  "ready_to_investigate_deeper": false,
+  "feedback_mode": "none"
+}
+
+Rules: only include a facts_update field if stated/changed this turn. cvProvided/jobDescriptionsProvided true only if actually given, never inferred. viewedCount is its own fact, never merged into responses/interviews. recentInterviewOutcomes: full updated short-entry list each time it changes. feedback_mode: "none" = ordinary turn; "signal" = genuine evidence-based insight, not yet a diagnosis; "diagnosis" = genuinely earned this turn (server independently re-verifies and can only downgrade this).
+
+CRITICAL: Output ONLY the JSON object. Nothing before or after. No backticks. No markdown.`;
+
+const buildCompactSystem = (language, searchContext = "", name = "") => {
+  const tone = TONE[language] || TONE.english;
+  const nameCtx = name ? `\nThe user's name is ${name} — use it naturally, not in every message.` : "";
+  return `${tone}${nameCtx}
+${searchContext}
+${COMPACT_INVESTIGATION_PROMPT}`;
+};
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Per-provider-call hard timeout. This is the actual fix for "stuck on
@@ -520,6 +599,7 @@ const callGemini = async (systemPrompt, messages, ctx = {}) => {
 
     if (res.status === 429) { const err = new Error("RATE_LIMITED"); err.code = "RATE_LIMIT"; throw err; }
     if (res.status === 408 || res.status === 504) { const err = new Error("TIMEOUT"); err.code = "PROVIDER_TIMEOUT"; throw err; }
+    if (res.status === 413) { const err = new Error(`Gemini request too large (${res.status})`); err.code = "REQUEST_TOO_LARGE"; throw err; }
     if (res.status === 400 || res.status === 401 || res.status === 403) { const err = new Error(`Gemini auth/request error ${res.status}`); err.code = "INVALID_API_KEY"; throw err; }
     const err = new Error(`Gemini ${res.status}`); err.code = "SERVER_ERROR"; throw err;
   }
@@ -535,10 +615,20 @@ const callGemini = async (systemPrompt, messages, ctx = {}) => {
   return reply;
 };
 
+// Groq's token-per-minute budget for this model is tight (a real production
+// request hit 413 "Limit 8000, Requested 9281"). Defense in depth beyond the
+// compact prompt: cap history length and output budget specifically for
+// Groq, regardless of what was passed in — Gemini keeps the full history
+// and MAX_TOKENS since it has no such ceiling.
+const GROQ_MAX_HISTORY_MESSAGES = 6;
+const GROQ_MAX_TOKENS = 1800;
+
 const callGroq = async (systemPrompt, messages, ctx = {}) => {
   const { requestId, stage = "groq", attempt = 1 } = ctx;
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) { const err = new Error("No Groq key"); err.code = "INVALID_API_KEY"; throw err; }
+
+  const trimmedMessages = messages.slice(-GROQ_MAX_HISTORY_MESSAGES);
 
   let res;
   try {
@@ -551,12 +641,12 @@ const callGroq = async (systemPrompt, messages, ctx = {}) => {
           model: "openai/gpt-oss-120b",
           messages: [
             { role: "system", content: systemPrompt },
-            ...messages.map(m => ({
+            ...trimmedMessages.map(m => ({
               role: m.role === "assistant" ? "assistant" : "user",
               content: m.content,
             })),
           ],
-          max_tokens: 2600,
+          max_tokens: GROQ_MAX_TOKENS,
           temperature: 0.7,
         }),
       },
@@ -578,6 +668,11 @@ const callGroq = async (systemPrompt, messages, ctx = {}) => {
 
     if (res.status === 429) { const err = new Error("RATE_LIMITED"); err.code = "RATE_LIMIT"; throw err; }
     if (res.status === 408 || res.status === 504) { const err = new Error("TIMEOUT"); err.code = "PROVIDER_TIMEOUT"; throw err; }
+    // 413 = request too large (Groq's TPM budget exceeded by this specific
+    // request). This is NEVER transient for an identical payload — retrying
+    // the same size request will always fail the same way. Distinct code,
+    // deliberately excluded from the retry-eligible set below.
+    if (res.status === 413) { const err = new Error(`Groq request too large (${res.status})`); err.code = "REQUEST_TOO_LARGE"; throw err; }
     if (res.status === 400 || res.status === 401 || res.status === 403) { const err = new Error(`Groq auth/request error ${res.status}`); err.code = "INVALID_API_KEY"; throw err; }
     const err = new Error(`Groq ${res.status}`); err.code = "SERVER_ERROR"; throw err;
   }
@@ -816,16 +911,20 @@ const sanitizeStructured = (parsed) => {
   return merged;
 };
 
-const getAiReply = async (systemPrompt, messages, ctx = {}) => {
+// fullSystemPrompt goes to Gemini (large context window, no evidence of a
+// token-budget problem there). compactSystemPrompt goes to Groq — see
+// COMPACT_INVESTIGATION_PROMPT above for why: a real production request
+// exceeded Groq's token-per-minute limit using the full prompt.
+const getAiReply = async (fullSystemPrompt, compactSystemPrompt, messages, ctx = {}) => {
   const { requestId, attempt = 1 } = ctx;
   console.log("[chat] gemini attempt", { requestId, attempt });
   try {
-    const rawReply = await callGemini(systemPrompt, messages, { requestId, stage: "gemini_primary", attempt });
+    const rawReply = await callGemini(fullSystemPrompt, messages, { requestId, stage: "gemini_primary", attempt });
     console.log("[chat] success", { requestId, provider: "gemini", attempt });
     return { rawReply, usedFallback: false };
   } catch (geminiErr) {
     console.log("[chat] groq fallback attempt", { requestId, attempt, geminiErrorCode: geminiErr.code });
-    const rawReply = await callGroq(systemPrompt, messages, { requestId, stage: "groq_fallback", attempt });
+    const rawReply = await callGroq(compactSystemPrompt, messages, { requestId, stage: "groq_fallback", attempt });
     console.log("[chat] success", { requestId, provider: "groq", attempt });
     return { rawReply, usedFallback: true };
   }
@@ -1153,15 +1252,21 @@ export async function POST(request) {
 
     console.log("[chat] search context chars:", searchContext.length);
 
+    // Two prompts: the full one for Gemini (generous context window, no
+    // evidence of a token-budget problem there), and a compact one for
+    // Groq specifically (see COMPACT_INVESTIGATION_PROMPT — a real
+    // production request exceeded Groq's token-per-minute limit using the
+    // full prompt: "Limit 8000, Requested 9281").
     const systemPrompt = buildSystem(language, searchContext, profile?.name || "");
-    console.log("[chat] system prompt chars:", systemPrompt.length);
+    const compactSystemPrompt = buildCompactSystem(language, searchContext, profile?.name || "");
+    console.log("[chat] prompt sizes", { requestId, fullChars: systemPrompt.length, compactChars: compactSystemPrompt.length });
 
     let rawReply;
     let usedFallback = false;
     let lastErrorCode = "SERVER_ERROR";
 
     try {
-      const result = await getAiReply(systemPrompt, messages, { requestId, attempt: 1 });
+      const result = await getAiReply(systemPrompt, compactSystemPrompt, messages, { requestId, attempt: 1 });
       rawReply = result.rawReply;
       usedFallback = result.usedFallback;
       console.log("[chat] provider responded", { requestId, provider: usedFallback ? "groq" : "gemini", elapsedMs: elapsed() });
@@ -1169,19 +1274,21 @@ export async function POST(request) {
       lastErrorCode = firstErr.code || "SERVER_ERROR";
       console.error("[chat] first attempt failed", { requestId, code: lastErrorCode, message: firstErr?.message, elapsedMs: elapsed() });
       // SERVER_ERROR (a bare 5xx from either provider) is just as likely to
-      // be transient as a rate limit or timeout — it was previously
-      // excluded from the auto-retry, so a single hiccup from either
-      // provider failed the whole turn with no retry at all.
+      // be transient as a rate limit or timeout. REQUEST_TOO_LARGE is
+      // deliberately NOT in this set — a 413 for an identical payload will
+      // fail identically on retry; that was the actual production bug
+      // (Groq 413 → blind retry → same 413 again, "Requested 9307").
       if (lastErrorCode === "RATE_LIMIT" || lastErrorCode === "PROVIDER_TIMEOUT" || lastErrorCode === "SERVER_ERROR") {
         console.log("[chat] transient error, retrying once after 2s", { requestId, code: lastErrorCode });
         await sleep(2000);
         try {
-          // Retry hits Groq directly, NOT the full gemini-then-groq cascade
-          // again — if Gemini just failed, re-trying it immediately is
-          // unlikely to help and doubles the worst-case latency for no real
-          // benefit. A single call to a different provider is both faster
-          // and still genuine provider diversity on the retry.
-          const retryReply = await callGroq(systemPrompt, messages, { requestId, stage: "groq_retry", attempt: 2 });
+          // Retry hits Groq directly with the COMPACT prompt, NOT the full
+          // gemini-then-groq cascade again — if Gemini just failed,
+          // re-trying it immediately is unlikely to help and doubles the
+          // worst-case latency for no real benefit. A single call to a
+          // different provider, with a request already sized to fit its
+          // budget, is both faster and still genuine provider diversity.
+          const retryReply = await callGroq(compactSystemPrompt, messages, { requestId, stage: "groq_retry", attempt: 2 });
           rawReply = retryReply;
           usedFallback = true;
           console.log("[chat] provider responded on retry", { requestId, provider: "groq", elapsedMs: elapsed() });
@@ -1189,6 +1296,11 @@ export async function POST(request) {
           lastErrorCode = secondErr.code || "SERVER_ERROR";
           console.error("[chat] retry also failed", { requestId, code: lastErrorCode, message: secondErr?.message, elapsedMs: elapsed() });
         }
+      } else if (lastErrorCode === "REQUEST_TOO_LARGE") {
+        // Even the compact prompt plus whatever history/context this
+        // specific request carries was too large for Groq. Don't retry —
+        // log enough to diagnose without another doomed attempt.
+        console.error("[chat] request too large for Groq, not retrying", { requestId, compactChars: compactSystemPrompt.length, messageCount: messages.length });
       }
     }
 
@@ -1198,12 +1310,13 @@ export async function POST(request) {
         PROVIDER_TIMEOUT: "The AI service took too long to respond. Please retry.",
         INVALID_API_KEY: "There is a configuration problem with the AI service.",
         BAD_PROVIDER_RESPONSE: "The AI service gave an unexpected response. Please retry.",
+        REQUEST_TOO_LARGE: "That conversation has gotten too long for me to process. Try starting a new chat.",
         SERVER_ERROR: "The AI service had a problem. Please retry in a moment.",
       };
       console.error("[chat] request failed, returning error to client", { requestId, finalCode: lastErrorCode, elapsedMs: elapsed() });
       return NextResponse.json(
         { error: true, code: lastErrorCode, message: messagesByCode[lastErrorCode] || messagesByCode.SERVER_ERROR, requestId },
-        { status: lastErrorCode === "RATE_LIMIT" ? 429 : 503 }
+        { status: lastErrorCode === "RATE_LIMIT" ? 429 : lastErrorCode === "REQUEST_TOO_LARGE" ? 413 : 503 }
       );
     }
 
@@ -1340,17 +1453,4 @@ export async function POST(request) {
     // exception. Never logs message content or secrets — only the error's
     // own message/stack and the request metadata.
     console.error("[chat] unhandled error", {
-      requestId, code: error?.code, message: error?.message, elapsedMs: elapsed(),
-      stack: error instanceof Error ? error.stack?.slice(0, 1000) : "no stack",
-    });
-    return NextResponse.json(
-      { error: true, code: error?.code || "SERVER_ERROR", message: `Request failed. Reference: ${requestId}`, requestId },
-      { status: 500 }
-    );
-  }
-}
-
-export async function GET() {
-  return NextResponse.json({ status: "LifePath running — job search conversion intelligence" });
-}
-
+      requestId, code: error?.code, message: error?.message, elapsedMs
