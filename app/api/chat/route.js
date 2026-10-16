@@ -397,7 +397,6 @@ Rules for feedback_mode — this is what the backend uses to decide what kind of
 This is a signal to the backend, not a final decision — the backend independently re-verifies the evidence before honoring "diagnosis" or "signal".
 
 CRITICAL: Output ONLY the JSON object. Nothing before or after. No backticks. No markdown.`;
-
 const buildSystem = (language, searchContext = "", name = "") => {
   const tone = TONE[language] || TONE.english;
   const nameCtx = name ? `\nThe user's name is ${name} — use it naturally, not in every message.` : "";
@@ -1142,8 +1141,7 @@ export async function POST(request) {
         { error: true, code: "INVALID_REQUEST", message: "Malformed request.", requestId },
         { status: 400 }
       );
-    }
-
+}
     const { messages, profile = {}, userId, action } = body;
     const isBeginInvestigation = action === "begin_investigation";
 
@@ -1441,7 +1439,23 @@ export async function POST(request) {
         feedback_mode: "none",
         diagnosis: { bottleneck: "", confidence: "low", reasoning: [] },
         leadingHypothesis: null,
-      ready_to_investigate_deeper: completeness.complete === true,
+      };
+    }
+
+    // Final fail-closed UI gate, outside persistence try/catch: even if
+    // Firestore persistence failed, the model cannot expose findings or a
+    // readiness button during UNDERSTAND. Readiness comes only from saved facts.
+    if (turnPhase === "understand") {
+      const completeness = userId && searchState ? computeCaseCompleteness(searchState) : { complete: false };
+      structured = {
+        ...structured,
+        insight: "",
+        signal: "",
+        recommended_action: "",
+        feedback_mode: "none",
+        diagnosis: { bottleneck: "", confidence: "low", reasoning: [] },
+        leadingHypothesis: null,
+        ready_to_investigate_deeper: completeness.complete === true,
       };
     } else {
       // The button is only a phase transition, never a shortcut to a diagnosis.
@@ -1476,3 +1490,4 @@ export async function POST(request) {
 export async function GET() {
   return NextResponse.json({ status: "LifePath running — job search conversion intelligence" });
 }
+
