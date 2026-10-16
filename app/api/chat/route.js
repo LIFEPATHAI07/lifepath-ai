@@ -1441,8 +1441,38 @@ export async function POST(request) {
         feedback_mode: "none",
         diagnosis: { bottleneck: "", confidence: "low", reasoning: [] },
         leadingHypothesis: null,
+      ready_to_investigate_deeper: completeness.complete === true,
       };
+    } else {
+      // The button is only a phase transition, never a shortcut to a diagnosis.
+      structured = { ...structured, ready_to_investigate_deeper: false };
     }
 
-    // Final fail-closed UI gate, outside persistence try/catch: even if
-    // Firestore persistence failed, the model cannot expose findi
+    console.log("[chat] request complete", { requestId, elapsedMs: elapsed(), engine: usedFallback ? "groq" : "gemini" });
+    return NextResponse.json({
+      structured,
+      verified_stats: verifiedStats,
+      language,
+      engine: usedFallback ? "groq" : "gemini",
+      requestId,
+    });
+  } catch (error) {
+    // The one true catch-all for anything not already handled above —
+    // requestId is now declared OUTSIDE this try (see top of function), so
+    // it's guaranteed to be available here even for a totally unexpected
+    // exception. Never logs message content or secrets — only the error's
+    // own message/stack and the request metadata.
+    console.error("[chat] unhandled error", {
+      requestId, code: error?.code, message: error?.message, elapsedMs: elapsed(),
+      stack: error instanceof Error ? error.stack?.slice(0, 1000) : "no stack",
+    });
+    return NextResponse.json(
+      { error: true, code: error?.code || "SERVER_ERROR", message: `Request failed. Reference: ${requestId}`, requestId },
+      { status: 500 }
+    );
+  }
+}
+
+export async function GET() {
+  return NextResponse.json({ status: "LifePath running — job search conversion intelligence" });
+}
