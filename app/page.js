@@ -115,7 +115,7 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbE
   const feedbackMode = data.feedback_mode || (data.analysis_ready === true ? "diagnosis" : "none");
   const isDiagnosis = feedbackMode === "diagnosis" && !!diagnosis?.bottleneck;
   const isSignal = feedbackMode === "signal" && !isDiagnosis;
-  const hasVerifiedNumbers = data.verified_stats && (data.verified_stats.portalRate != null || data.verified_stats.directRate != null || data.verified_stats.sampleSize);
+  const hasVerifiedNumbers = data.verified_stats && (data.verified_stats.portalRate != null || data.verified_stats.directRate != null || data.verified_stats.applicationsReported != null);
 
   const submitDiagnosisPositive = () => {
     onFeedback?.({
@@ -221,9 +221,9 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbE
                 Direct: {data.verified_stats.directRate}% response ({data.verified_stats.directResponses}/{data.verified_stats.directApplications})
               </div>
             )}
-            {data.verified_stats.sampleSize && (
-              <div title="How much application volume we have — not a judgment about any specific cause" style={{ color: "#475569", fontSize: 11, marginTop: 6, fontStyle: "italic" }}>
-                Sample size so far: {data.verified_stats.sampleSize}
+            {data.verified_stats.applicationsReported != null && (
+              <div title="This is the number of applications reported, not diagnostic confidence." style={{ color: "#475569", fontSize: 11, marginTop: 6, fontStyle: "italic" }}>
+                Applications reported: {data.verified_stats.applicationsReported} (not evidence strength)
               </div>
             )}
           </div>
@@ -458,9 +458,9 @@ export default function LifePath() {
     setMessages((m) => [...m, { role: "assistant", content: "⚠️ Please upload a PDF or TXT file — other formats aren't supported yet. You can paste your CV text directly instead.", structured: null }]);
   };
 
-  const sendMessage = async (overrideText, baseMessages) => {
-    const userMsg = (overrideText || input).trim();
-    if ((!userMsg && !cvFile) || loading || sendingRef.current) return;
+  const sendMessage = async (overrideText, baseMessages, requestAction = null) => {
+    const userMsg = requestAction ? "" : (overrideText ?? input).trim();
+    if ((!userMsg && !cvFile && !requestAction) || loading || sendingRef.current) return;
     sendingRef.current = true;
 
     const usage = getUsage();
@@ -507,9 +507,11 @@ export default function LifePath() {
       displayText = userMsg ? `${userMsg}\n\n📎 ${attachedCv.name}` : `📎 ${attachedCv.name}`;
     }
 
-    apiMessages.push({ role: "user", content: outgoingText });
+    if (outgoingText) apiMessages.push({ role: "user", content: outgoingText });
 
-    const newMsgs = [...historyBase, { role: "user", content: displayText }];
+    const newMsgs = displayText
+      ? [...historyBase, { role: "user", content: displayText }]
+      : historyBase;
     setMessages(newMsgs);
     setLoading(true);
     S.set("lp_usage", { ...usage, count: usage.count + 1 });
@@ -527,7 +529,7 @@ export default function LifePath() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: apiMessages, userId: getUserId() }),
+        body: JSON.stringify({ messages: apiMessages, userId: getUserId(), ...(requestAction ? { action: requestAction } : {}) }),
         signal: controller.signal,
       });
       const data = await res.json();
@@ -797,7 +799,7 @@ export default function LifePath() {
                   <InvestigationCard
                     key={i}
                     data={msg.structured}
-                    onInvestigateDeeper={() => sendMessage("Yes, let's investigate further.")}
+                    onInvestigateDeeper={() => sendMessage("", undefined, "begin_investigation")}
                     onFeedback={(payload) => handleFeedback(i, payload)}
                     fbState={fbStates[i] || "idle"}
                     fbError={fbErrors[i]}
