@@ -986,20 +986,6 @@ function computeVerifiedStats(state) {
   return Object.keys(stats).length > 0 ? stats : null;
 }
 
-// Purely a volume label — "how much application data do we have," never a
-// judgment about whether any particular hypothesis is correct. Kept
-// deliberately separate from hypothesis confidence so the two can never be
-// conflated in the UI again (that conflation was the exact bug: a permanent
-// "EVIDENCE: HIGH" badge that outlived whatever specific claim it was
-// attached to).
-function computeSampleSize(state) {
-  const total = state.applicationsTotal;
-  if (total == null) return null;
-  if (total < 15) return "Low";
-  if (total < 50) return "Medium";
-  return "High";
-}
-
 // The one thing that's actually allowed to look like "we're onto
 // something": pick the single strongest currently-tracked hypothesis (by
 // status, then confidence) so the UI can show confidence in THAT specific
@@ -1159,6 +1145,7 @@ export async function POST(request) {
     }
 
     const { messages, profile = {}, userId, action } = body;
+    const isBeginInvestigation = action === "begin_investigation";
 
     // Handle a direct reset request — does NOT run normal AI processing.
     if (action === "clear_search") {
@@ -1196,7 +1183,7 @@ export async function POST(request) {
     }
 
     const rawLatest = messages.filter(m => m.role === "user").slice(-1)[0]?.content || "";
-    const latestMsg = rawLatest.trim().replace(/[<>&"']/g, "");
+    const latestMsg = (isBeginInvestigation ? "Begin the investigation using the facts already gathered. Do not ask the user to confirm this button click." : rawLatest).trim().replace(/[<>&"']/g, "");
 
     if (!latestMsg) {
       return NextResponse.json(
@@ -1206,6 +1193,11 @@ export async function POST(request) {
     }
 
     const language = detectLanguage(latestMsg);
+    // This is an explicit UI action, not a user-authored chat message. Add a
+    // private instruction to the model context without displaying it as chat.
+    if (isBeginInvestigation) {
+      messages.push({ role: "user", content: latestMsg });
+    }
 
     let searchState = null;
     let searchContext = "";
@@ -1223,16 +1215,20 @@ export async function POST(request) {
         searchState = await withTimeout(ensureSearchState(userId), FIRESTORE_TIMEOUT_MS, "state_load", requestId);
         console.log("[chat] state loaded", { requestId, elapsedMs: elapsed() });
 
-        // Explicit UNDERSTAND → INVESTIGATE transition. Checked against
-        // whatever was persisted through the END of the previous turn — if
-        // the case was already complete, this turn starts in INVESTIGATE
-        // rather than wasting a turn still labeled UNDERSTAND.
-        if ((searchState.phase || "understand") === "understand") {
+        // Phase changes only after an explicit button action. Completeness
+        // makes the button available; it must never silently change the phase.
+        if (isBeginInvestigation && (searchState.phase || "understand") === "understand") {
           const completeness = computeCaseCompleteness(searchState);
-          if (completeness.complete) {
-            searchState = await withTimeout(updateSearchState(userId, { phase: "investigate" }), FIRESTORE_TIMEOUT_MS, "phase_transition_persist", requestId);
-            logEvent(userId, "phase_transition", { to: "investigate" });
+          if (!completeness.complete) {
+            return NextResponse.json({
+              error: true,
+              code: "CASE_INCOMPLETE",
+              message: `We still need: ${completeness.missing.join(", ")}. Please share that first, then start the investigation.`,
+              requestId,
+            }, { status: 409 });
           }
+          searchState = await withTimeout(updateSearchState(userId, { phase: "investigate" }), FIRESTORE_TIMEOUT_MS, "phase_transition_persist", requestId);
+          logEvent(userId, "phase_transition", { to: "investigate" });
         }
         turnPhase = searchState.phase || "understand";
 
@@ -1341,11 +1337,10 @@ export async function POST(request) {
         }
 
         verifiedStats = computeVerifiedStats(searchState);
-        const sampleSize = computeSampleSize(searchState);
-        if (verifiedStats) {
-          verifiedStats.sampleSize = sampleSize;
-        } else if (sampleSize) {
-          verifiedStats = { sampleSize };
+        // Show the reported count as a fact, not a Low/Medium/High proxy for
+        // evidence quality. Application volume alone says nothing about cause.
+        if (searchState?.applicationsTotal != null) {
+          verifiedStats = { ...(verifiedStats || {}), applicationsReported: searchState.applicationsTotal };
         }
 
         // Persist hypothesis tracking regardless of feedback_mode, so the
@@ -1379,8 +1374,19 @@ export async function POST(request) {
             insight: "",
             signal: "",
             recommended_action: "",
+            // Readiness is assigned deterministically below from persisted facts,
+            // never trusted from the model.
             ready_to_investigate_deeper: false,
           };
+        }
+        if (turnPhase === "understand") {
+          const completeness = computeCaseCompleteness(searchState);
+          structured = {
+            ...structured,
+            ready_to_investigate_deeper: completeness.complete,
+          };
+        } else {
+          structured = { ...structured, ready_to_investigate_deeper: false };
         }
 
         // Server-side gate — never trust the model's own feedback_mode or
@@ -1438,32 +1444,5 @@ export async function POST(request) {
       };
     }
 
-    console.log("[chat] request complete", { requestId, elapsedMs: elapsed(), engine: usedFallback ? "groq" : "gemini" });
-    return NextResponse.json({
-      structured,
-      verified_stats: verifiedStats,
-      language,
-      engine: usedFallback ? "groq" : "gemini",
-      requestId,
-    });
-  } catch (error) {
-    // The one true catch-all for anything not already handled above —
-    // requestId is now declared OUTSIDE this try (see top of function), so
-    // it's guaranteed to be available here even for a totally unexpected
-    // exception. Never logs message content or secrets — only the error's
-    // own message/stack and the request metadata.
-    console.error("[chat] unhandled error", {
-      requestId, code: error?.code, message: error?.message, elapsedMs: elapsed(),
-      stack: error instanceof Error ? error.stack?.slice(0, 1000) : "no stack",
-    });
-    return NextResponse.json(
-      { error: true, code: error?.code || "SERVER_ERROR", message: `Request failed. Reference: ${requestId}`, requestId },
-      { status: 500 }
-    );
-  }
-}
-
-export async function GET() {
-  return NextResponse.json({ status: "LifePath running — job search conversion intelligence" });
-}
-
+    // Final fail-closed UI gate, outside persistence try/catch: even if
+    // Firestore persistence failed, the model cannot expose findi
