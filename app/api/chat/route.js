@@ -10,6 +10,7 @@ import {
   resetSearchState,
   computeFunnelBreak,
   computeCaseCompleteness,
+  getEffectivePhase,
   logEvent,
 } from "../../../lib/userMemory";
 
@@ -98,7 +99,7 @@ Ask COMPACT questions that can pull multiple data points from one answer, instea
 
 When a genuinely faster path to evidence exists — e.g. the user could upload their CV and describe a handful of jobs they applied to, letting LifePath compare directly — offer that instead of manually asking about each requirement one at a time. Example: "Fastest way for me to look into this: paste or upload the CV you're actually using, and tell me 5-10 of the roles you applied to. I'll compare them myself." Only offer this when it would genuinely reduce the user's effort, not as a default first move.
 
-There is NO fixed order to gather these in, and no fixed sequence of topics (not "applications → experience → CV → job descriptions → interview" or any other canned order) — different users have different real problems, and the same opening sentence ("500 applications, no response") can turn out to be about targeting, channel, duplicates, CV fit, or something else entirely depending on THIS user's facts. What's actually useful to know varies: role/location, a rough sense of volume and outcomes, channel split, responses by channel, interviews — these are all things you might ask about, in whatever order actually reduces the most uncertainty for the hypotheses currently live for this specific case. Do not force experience level, salary, or CV upload up front — ask for these (or anything else) only when the investigation actually needs them for the hypothesis in front of you right now.
+There is NO fixed order to gather these in, and no fixed sequence of topics (not "applications → experience → CV → job descriptions → interview" or any other canned order) — different users have different real problems, and the same opening sentence ("500 applications, no response") can turn out to be about targeting, channel, duplicates, CV fit, or something else entirely depending on THIS user's facts. What's actually useful to know varies: role/location, a rough sense of volume and outcomes, channel split, responses by channel, interviews — these are all things you might ask about, in whatever order actually reduces the most uncertainty for the hypotheses currently live for this specific case. Do not force salary or CV upload up front — ask for those only when the investigation actually needs them. Experience level is the exception: it is required before the investigation can begin, so ask for it while CASE PHASE is UNDERSTAND whenever JOB SEARCH STATE lists it as still needed, combining it with other missing facts in one compact question where possible. When the user tells you their experience, always record it in facts_update.experienceLevel as a short plain phrase in their own terms (for example "fresher, no work experience", "3 months", "2 years"). Never leave it empty once they have told you.
 
 ━━━━━━━━━━━━━━
 CONTEXTUAL TIPS — HOW TO ANSWER, NOT WHAT TO ANSWER
@@ -135,9 +136,10 @@ While CASE PHASE is UNDERSTAND:
 - Your ONLY job is to collect facts, clarify contradictions, and summarize what's actually known so far. Nothing else.
 - You may privately track hypotheses (to decide which question would be most useful to ask next) but you must NEVER expose them — no findings, no diagnoses, no confidence levels, no "likely causes," no causal interpretations, not even hedged ones. Leave insight/signal/recommended_action/hypotheses-exposure entirely out of your visible response — the server blanks these fields during UNDERSTAND regardless, but don't bother writing them.
 - Do NOT say things like "this may be the biggest issue," "many of these are probably reposts/consultancies," "experience mismatch may be causing the rejection," "that's a red flag," or any similar interpretation — these are exactly the premature, unsupported generic assumptions this phase exists to prevent. If you catch yourself about to explain WHY something might be happening, stop — that belongs to INVESTIGATE, not UNDERSTAND.
+- The visible "reply" text itself must contain NO speculation about ATS systems, keyword filters, automated screening, how recruiters handle or read applications, or why applications are failing — not even hedged, and not even as a "possibility." Do not mention ATS at all during UNDERSTAND. A "viewed" status is only a portal status; never describe what it means about a recruiter. The reply should only acknowledge the facts given, say what is still needed and why it helps, and ask the one question. The server will replace a reply that speculates this way with a plain fallback question.
 - Ask EXACTLY ONE high-value question per turn. The question itself must be the primary visible text, in the reply field — never bury the actual question only inside tip (tip is a short, optional hint on HOW to answer, not where the question lives) or next_question (not shown to the user at all). A short example of how to answer is fine to include in reply or tip if it helps.
 - Case completeness is adaptive to THIS user's case, not a fixed checklist — JOB SEARCH STATE tells you what's still needed. Do not demand information irrelevant to this specific case (CV, job descriptions, interview outcomes, employment status, etc. are investigation-phase evidence, not UNDERSTAND-phase requirements) — only ask for what's listed as still needed.
-- Once JOB SEARCH STATE says the case is complete, the server transitions to INVESTIGATE automatically at the start of the next turn — you don't need to announce the transition yourself, just continue naturally once you see CASE PHASE: INVESTIGATE.
+- Once JOB SEARCH STATE says the case is complete, the server shows the user a button to begin the investigation. The user decides when to press it; the phase changes only after they do. Until then, you may acknowledge that you now have enough context to start, but do not start interpreting.
 
 Once CASE PHASE is INVESTIGATE: the case is understood, and everything in THE HARD REASONING MODEL below becomes available — you may present signals, test competing hypotheses with evidence, and work toward an earned diagnosis, under all the same safeguards as before (evidence ladder, funnel-break-first, CV-vs-causality distinction, "viewed" semantics, 2+ hypotheses required, etc. — none of that changes).
 
@@ -384,7 +386,7 @@ RESPONSE JSON — OUTPUT ONLY THIS, NOTHING ELSE
   "feedback_mode": "none"
 }
 
-Rules for facts_update: only include a field if the user stated it THIS turn or it changed. Set cvProvided to true only if the user actually attached/pasted CV content this turn. Set jobDescriptionsProvided to true only once the user has actually given representative job posting text/requirements this turn or previously — never infer it. viewedCount is a PORTAL-REPORTED status count only (e.g. "30 marked as viewed") — record it as its own fact, never merge it into responses/interviews and never imply it means a human evaluated the application. sameCvForEveryApplication is a plain boolean fact about their process, not a judgment. uniqueOpportunityCount/uniqueCompanyCount are only set from what the user actually tells you (e.g. "maybe 50 of those were actually distinct companies") — never estimate or invent a duplicate-rate number yourself. For recentInterviewOutcomes, include the FULL updated list of short outcome entries (e.g. ["Interview 1 (TechCorp): ghosted", "Interview 2: rejected after technical round", "Interview 3: still waiting"]) whenever the user gives or updates this information — each entry should be a short human-readable outcome, not a raw category word alone.
+Rules for facts_update: only include a field if the user stated it THIS turn or it changed. Set cvProvided to true only if the user actually attached/pasted CV content this turn. Set jobDescriptionsProvided to true only once the user has actually given representative job posting text/requirements this turn or previously — never infer it. viewedCount is a PORTAL-REPORTED status count only (e.g. "30 marked as viewed") — record it as its own fact, never merge it into responses/interviews and never imply it means a human evaluated the application. sameCvForEveryApplication is a plain boolean fact about their process, not a judgment. uniqueOpportunityCount/uniqueCompanyCount are only set from what the user actually tells you (e.g. "maybe 50 of those were actually distinct companies") — never estimate or invent a duplicate-rate number yourself. experienceLevel: record it only from what the user says about THEIR OWN work experience, as a short plain phrase in their own terms (e.g. "fresher, no work experience", "3 months of drafting", "2 years") — never infer it from other durations or numbers ("I have been applying for 3 months" or "100 applications" say nothing about work experience). For recentInterviewOutcomes, include the FULL updated list of short outcome entries (e.g. ["Interview 1 (TechCorp): ghosted", "Interview 2: rejected after technical round", "Interview 3: still waiting"]) whenever the user gives or updates this information — each entry should be a short human-readable outcome, not a raw category word alone.
 
 Rules for hypotheses: keep at most 3 hypotheses active at once — the ones actually worth tracking, not every conceivable one. Once any hypothesis exists, output the FULL current array every turn (carry forward ones from JOB SEARCH STATE, update their status/confidence/evidence fields in light of this turn, never silently drop one). Leave the array empty ONLY before any hypothesis is worth naming yet. Keep each evidence field (supportingEvidence/contradictingEvidence/missingEvidence) to one short sentence or leave it empty — do not pad these. IMPORTANT: the server independently re-derives status/confidence from these three fields and will downgrade (never upgrade) whatever you claim — empty supportingEvidence caps you at "investigating"/"low" no matter what status/confidence you write; a non-empty missingEvidence caps you at "plausible" and "low" confidence (this is the fix for the "we still don't know X, but confidence: medium" contradiction — if you write something in missingEvidence, confidence must NOT read as medium/high, so don't bother claiming it); a non-empty contradictingEvidence caps you at "plausible"/"medium". Only supportingEvidence present + missingEvidence empty + contradictingEvidence empty allows "supported"/"confirmed" and "high" through. So write these fields honestly — inflating status/confidence without clearing missingEvidence/contradictingEvidence first accomplishes nothing.
 
@@ -422,9 +424,9 @@ YOU ARE: LifePath — an evidence-first job search conversion investigator for j
 REASONING ORDER (never skip a step): FACT → SIGNAL → HYPOTHESIS → INVESTIGATION → EVIDENCE → CONFIDENCE → DIAGNOSIS → ACTION. A SIGNAL (a pattern, e.g. "0 offers from 6 interviews") is never automatically a cause. Never diagnose from the opening message alone.
 
 CASE PHASE (given each turn in JOB SEARCH STATE as UNDERSTAND or INVESTIGATE — a hard, server-enforced gate):
-- UNDERSTAND: collect facts, clarify contradictions, summarize what's known, ask ONE high-value question at a time. You may track hypotheses privately to pick the best question, but NEVER expose findings, diagnoses, confidence levels, or causal interpretations — not even hedged ones. No "this may be the biggest issue" style language. The server strips these fields anyway if you ignore this.
+- UNDERSTAND: collect facts, clarify contradictions, summarize what's known, ask ONE high-value question at a time. You may track hypotheses privately to pick the best question, but NEVER expose findings, diagnoses, confidence levels, or causal interpretations — not even hedged ones. No "this may be the biggest issue" style language. The visible reply must contain NO speculation about ATS, keyword filters, automated screening, recruiter behavior, or why applications are failing — do not mention ATS at all in UNDERSTAND, and never describe what a "viewed" status means about a recruiter. The server strips these fields (and replaces a speculative reply) anyway if you ignore this.
 - INVESTIGATE: the case is understood. You may now surface signals, test competing hypotheses, and work toward an earned diagnosis — still under every rule below.
-Case completeness is adaptive (role + location + at least one outcome fact — not a fixed checklist); JOB SEARCH STATE tells you what's still needed.
+Case completeness requires role, location, experience level and at least one outcome fact (responses, "viewed" status or interviews); JOB SEARCH STATE tells you what's still needed. While UNDERSTAND, ask for whatever JOB SEARCH STATE lists as still needed, one compact question at a time. Whenever the user states their own work experience, record it in facts_update.experienceLevel as a short plain phrase (e.g. "fresher", "3 months", "2 years") — never infer it from other durations like how long they've been applying.
 
 FUNNEL FIRST: locate WHERE the search breaks (application→response, response→interview, interview→offer — JOB SEARCH STATE gives you "FUNNEL BREAK LOCATED SO FAR") before investigating WHY. Don't reach for CV/ATS causes if the break isn't at/before application→response. "500 applications, 0 interviews" and "50 applications, 15 calls, 10 interviews, 0 offers" are different cases needing different investigation — never assume the same cause for the same opening complaint.
 
@@ -675,7 +677,6 @@ const callGroq = async (systemPrompt, messages, ctx = {}) => {
     if (res.status === 400 || res.status === 401 || res.status === 403) { const err = new Error(`Groq auth/request error ${res.status}`); err.code = "INVALID_API_KEY"; throw err; }
     const err = new Error(`Groq ${res.status}`); err.code = "SERVER_ERROR"; throw err;
   }
-
   const data = await res.json();
   const reply = data.choices?.[0]?.message?.content;
   if (!reply) {
@@ -900,6 +901,13 @@ const sanitizeStructured = (parsed) => {
   merged.facts_update.channels = { ...SAFE_DEFAULTS.facts_update.channels, ...(parsed.facts_update?.channels || {}) };
   merged.facts_update.channelResponses = { ...SAFE_DEFAULTS.facts_update.channelResponses, ...(parsed.facts_update?.channelResponses || {}) };
 
+  // Every field the UI renders as text must actually be a string — a model
+  // that returns an object/number/null here would otherwise crash the card
+  // (and break the server-side text checks below).
+  for (const key of ["reply", "insight", "uncertainty", "recommended_action", "next_question", "tip"]) {
+    merged[key] = typeof parsed[key] === "string" ? parsed[key] : "";
+  }
+
   merged.hypotheses = Array.isArray(parsed.hypotheses)
     ? parsed.hypotheses.map(sanitizeHypothesis).filter(Boolean).map(enforceHypothesisEvidenceLadder).slice(0, MAX_HYPOTHESES)
     : [];
@@ -934,7 +942,15 @@ function extractNonEmptyUpdates(factsUpdate) {
   if (factsUpdate.problemStatement) updates.problemStatement = factsUpdate.problemStatement;
   if (factsUpdate.roleTarget) updates.roleTarget = factsUpdate.roleTarget;
   if (factsUpdate.location) updates.location = factsUpdate.location;
-  if (factsUpdate.experienceLevel) updates.experienceLevel = factsUpdate.experienceLevel;
+  // Accept a non-empty string ("fresher", "3 months") or a finite number
+  // (0 for "no experience" would be lost by a plain truthiness check).
+  // Stored as a short trimmed string. The server never derives experience
+  // from anything else — it only saves what the model extracted from the
+  // user's own statement about their work experience.
+  const exp = factsUpdate.experienceLevel;
+  if ((typeof exp === "string" && exp.trim()) || (typeof exp === "number" && Number.isFinite(exp))) {
+    updates.experienceLevel = String(exp).trim().slice(0, 120);
+  }
   if (factsUpdate.applicationsTotal != null) updates.applicationsTotal = factsUpdate.applicationsTotal;
   if (factsUpdate.responses != null) updates.responses = factsUpdate.responses;
   if (factsUpdate.interviews != null) updates.interviews = factsUpdate.interviews;
@@ -1106,6 +1122,27 @@ function computeFeedbackMode(structured, state) {
   return "none";
 }
 
+const EMPTY_DIAGNOSIS = () => ({ bottleneck: "", confidence: "low", reasoning: [] });
+
+// During UNDERSTAND the visible reply must not speculate about ATS systems,
+// automated screening, or likely causes. The prompt forbids it, but free
+// text can't be fully policed on the server — this is a narrow, fail-closed
+// safety net for the specific failure seen in real testing (the app telling
+// a user their CV was probably failing ATS screening before any evidence
+// existed). It only catches clear English phrases; the prompt remains the
+// main defense, and the manual test checklist is what verifies it.
+const SPECULATIVE_UNDERSTAND_PATTERN = /\b(ats|applicant[- ]tracking|keyword[- ]?(match|matching|filter|filtering|scan|scanning|screen|screening)|auto[- ]?reject(ed|ion|s)?|screened out|filtered out|initial screening|resume screening|cv screening|red flag|biggest issue|probably because|likely because|most likely cause)\b/i;
+
+function buildUnderstandFallbackReply(searchState) {
+  const completeness = searchState
+    ? computeCaseCompleteness(searchState)
+    : { complete: false, missing: ["target role", "location", "experience level"] };
+  if (completeness.complete) {
+    return "Thanks — that gives me enough context to start looking into your situation properly. If you feel you've shared enough, tap the button below to begin the investigation, or tell me anything else you think matters.";
+  }
+  return `Thanks — I'm still building a clear picture of your situation, and I don't want to guess at causes before I have it. One thing I still need: ${completeness.missing[0]}. Could you share that?`;
+}
+
 export async function POST(request) {
   // Hoisted OUTSIDE the try block on purpose: a `const`/`let` declared
   // inside a try is NOT visible inside its own catch block (JS block
@@ -1141,7 +1178,7 @@ export async function POST(request) {
         { error: true, code: "INVALID_REQUEST", message: "Malformed request.", requestId },
         { status: 400 }
       );
-}
+    }
     const { messages, profile = {}, userId, action } = body;
     const isBeginInvestigation = action === "begin_investigation";
 
@@ -1169,18 +1206,27 @@ export async function POST(request) {
     console.log("[chat] request start", {
       requestId,
       userId,
-      messageCount: messages?.length,
-      totalChars: messages?.reduce((sum, m) => sum + (m.content?.length || 0), 0),
+      messageCount: Array.isArray(messages) ? messages.length : null,
+      totalChars: Array.isArray(messages) ? messages.reduce((sum, m) => sum + (m?.content?.length || 0), 0) : null,
     });
 
-    if (!messages?.length) {
+    if (!Array.isArray(messages) || !messages.length) {
       return NextResponse.json(
         { error: true, code: "INVALID_REQUEST", message: "Messages required.", requestId },
         { status: 400 }
       );
     }
 
-    const rawLatest = messages.filter(m => m.role === "user").slice(-1)[0]?.content || "";
+    // Starting the investigation is a phase change on SAVED state, so it
+    // can't be validated (or honored) without a user to load that state for.
+    if (isBeginInvestigation && !userId) {
+      return NextResponse.json(
+        { error: true, code: "INVALID_REQUEST", message: "We couldn't identify your session, so the investigation can't start. Please refresh the page and try again.", requestId },
+        { status: 400 }
+      );
+    }
+
+    const rawLatest = messages.filter(m => m?.role === "user").slice(-1)[0]?.content || "";
     const latestMsg = (isBeginInvestigation ? "Begin the investigation using the facts already gathered. Do not ask the user to confirm this button click." : rawLatest).trim().replace(/[<>&"']/g, "");
 
     if (!latestMsg) {
@@ -1190,7 +1236,12 @@ export async function POST(request) {
       );
     }
 
-    const language = detectLanguage(latestMsg);
+    // Language comes from what the USER actually wrote. On a button click the
+    // "latest message" is an internal English instruction, so detecting from
+    // it would silently switch a Malayalam/Hindi user to English. Use the
+    // user's most recent real message instead (falls back to English only if
+    // there is none).
+    const language = detectLanguage(rawLatest || latestMsg);
     // This is an explicit UI action, not a user-authored chat message. Add a
     // private instruction to the model context without displaying it as chat.
     if (isBeginInvestigation) {
@@ -1202,7 +1253,9 @@ export async function POST(request) {
     // The phase in effect for THIS turn, frozen once at the top and used
     // consistently both to build the prompt and to gate the response at the
     // end — so the model is never told "understand" while the server then
-    // lets a "signal"/"diagnosis" through anyway, or vice versa.
+    // lets a "signal"/"diagnosis" through anyway, or vice versa. Defaults to
+    // the restrictive phase, so if saved state can't be loaded for an
+    // ordinary message the response is still fully gated.
     let turnPhase = "understand";
     if (userId) {
       try {
@@ -1215,7 +1268,17 @@ export async function POST(request) {
 
         // Phase changes only after an explicit button action. Completeness
         // makes the button available; it must never silently change the phase.
-        if (isBeginInvestigation && (searchState.phase || "understand") === "understand") {
+        if (isBeginInvestigation) {
+          if (getEffectivePhase(searchState) === "investigate") {
+            // Already started (double tap, or a stale button on an old
+            // message). No AI call, no state change — just tell the user.
+            return NextResponse.json({
+              error: true,
+              code: "ALREADY_INVESTIGATING",
+              message: "The investigation has already started. Just keep chatting below and I'll continue from here.",
+              requestId,
+            }, { status: 409 });
+          }
           const completeness = computeCaseCompleteness(searchState);
           if (!completeness.complete) {
             return NextResponse.json({
@@ -1228,7 +1291,7 @@ export async function POST(request) {
           searchState = await withTimeout(updateSearchState(userId, { phase: "investigate" }), FIRESTORE_TIMEOUT_MS, "phase_transition_persist", requestId);
           logEvent(userId, "phase_transition", { to: "investigate" });
         }
-        turnPhase = searchState.phase || "understand";
+        turnPhase = getEffectivePhase(searchState);
 
         searchContext = buildSearchContext(searchState);
 
@@ -1240,7 +1303,20 @@ export async function POST(request) {
           logEvent(userId, "user_returned", { gapHours: Math.round((Date.now() - searchState.updatedAt) / 3600000) });
         }
       } catch (memErr) {
-        console.error("[chat] search state load failed, continuing without it", { requestId, code: memErr?.code, message: memErr?.message, elapsedMs: elapsed() });
+        console.error("[chat] search state load failed", { requestId, code: memErr?.code, message: memErr?.message, isBeginInvestigation, elapsedMs: elapsed() });
+        if (isBeginInvestigation) {
+          // Never silently continue with default/stale state on the one
+          // action whose whole point is a state change: the user would see
+          // a normal-looking reply while the investigation never started.
+          return NextResponse.json({
+            error: true,
+            code: "STATE_UNAVAILABLE",
+            message: "We couldn't load your saved progress, so the investigation hasn't started yet. Your conversation is safe — please tap the button again in a moment.",
+            requestId,
+          }, { status: 503 });
+        }
+        // Ordinary message: continue without saved state. turnPhase stays
+        // "understand", so the response is still fully gated below.
       }
     }
 
@@ -1326,6 +1402,12 @@ export async function POST(request) {
     let structured = sanitizeStructured(parsed);
 
     let verifiedStats = null;
+    // Set to true only once the evidence checks for this turn have actually
+    // run to completion (feedback mode verified, unearned diagnosis cleared).
+    // If anything before that point throws — a Firestore timeout while
+    // saving facts, say — the INVESTIGATE response is forced down to its safe
+    // form below instead of leaking the model's unchecked diagnosis.
+    let evidenceGateCompleted = false;
     if (userId) {
       try {
         const updates = extractNonEmptyUpdates(structured.facts_update);
@@ -1363,15 +1445,17 @@ export async function POST(request) {
         // found") and `recommended_action`/`ready_to_investigate_deeper`
         // independently of feedback_mode, so gating feedback_mode alone is
         // NOT sufficient to hide findings/interpretations during UNDERSTAND
-        // — strip the content itself. `reply`, `uncertainty`, `next_question`
-        // and `tip` are untouched: that's where the actual question and
-        // factual summary live, which IS allowed during UNDERSTAND.
+        // — strip the content itself. `reply`, `next_question` and `tip`
+        // are untouched here (the final gate below checks `reply`/`tip`
+        // for speculation): that's where the actual question and factual
+        // summary live, which IS allowed during UNDERSTAND.
         if (turnPhase === "understand") {
           structured = {
             ...structured,
             insight: "",
             signal: "",
             recommended_action: "",
+            uncertainty: "",
             // Readiness is assigned deterministically below from persisted facts,
             // never trusted from the model.
             ready_to_investigate_deeper: false,
@@ -1406,15 +1490,21 @@ export async function POST(request) {
           logEvent(userId, "useful_finding_produced", { insight: (structured.insight || structured.signal || "").slice(0, 160) });
         }
 
-        if (finalFeedbackMode === "diagnosis" && structured.diagnosis?.bottleneck) {
+        // Never let an unearned diagnosis object reach the client. This is
+        // cleared BEFORE any further write below, so a persistence failure
+        // after this point can't resurrect it.
+        const diagnosisEarned = finalFeedbackMode === "diagnosis" && !!structured.diagnosis?.bottleneck;
+        if (!diagnosisEarned) {
+          structured = { ...structured, diagnosis: EMPTY_DIAGNOSIS() };
+        }
+        evidenceGateCompleted = true;
+
+        if (diagnosisEarned) {
           // Only an earned diagnosis is persisted as "the" diagnosis — this is
           // what future turns see as "previously earned diagnosis" and are
           // explicitly told they may revise or retract.
           searchState = await withTimeout(updateSearchState(userId, { diagnosis: structured.diagnosis }), FIRESTORE_TIMEOUT_MS, "diagnosis_persist", requestId);
           logEvent(userId, "investigation_completed", { bottleneck: structured.diagnosis.bottleneck });
-        } else {
-          // Never let an unearned diagnosis object reach the client.
-          structured = { ...structured, diagnosis: { bottleneck: "", confidence: "low", reasoning: [] } };
         }
 
         // Bookkeeping only — never block the response on these. Losing one
@@ -1429,7 +1519,7 @@ export async function POST(request) {
         }
         console.log("[chat] state persisted", { requestId, elapsedMs: elapsed() });
       } catch (err) {
-        console.error("[chat] search state update failed (non-fatal)", { requestId, code: err?.code, message: err?.message, elapsedMs: elapsed() });
+        console.error("[chat] search state update failed (non-fatal)", { requestId, code: err?.code, message: err?.message, evidenceGateCompleted, elapsedMs: elapsed() });
       }
     } else {
       // No userId at all means no persisted evidence to verify against —
@@ -1437,7 +1527,7 @@ export async function POST(request) {
       structured = {
         ...structured,
         feedback_mode: "none",
-        diagnosis: { bottleneck: "", confidence: "low", reasoning: [] },
+        diagnosis: EMPTY_DIAGNOSIS(),
         leadingHypothesis: null,
       };
     }
@@ -1447,19 +1537,51 @@ export async function POST(request) {
     // readiness button during UNDERSTAND. Readiness comes only from saved facts.
     if (turnPhase === "understand") {
       const completeness = userId && searchState ? computeCaseCompleteness(searchState) : { complete: false };
+
+      // Nothing the model wrote in `hypotheses` is exposed to the user
+      // during UNDERSTAND (the UI never renders it, but the API response
+      // shouldn't carry it either).
+      let reply = structured.reply;
+      let tip = structured.tip;
+      if (SPECULATIVE_UNDERSTAND_PATTERN.test(`${reply}\n${tip}`)) {
+        console.warn("[chat] speculative reply blocked during UNDERSTAND", { requestId });
+        reply = buildUnderstandFallbackReply(userId ? searchState : null);
+        tip = "";
+      }
+
       structured = {
         ...structured,
+        reply,
+        tip,
         insight: "",
         signal: "",
         recommended_action: "",
+        uncertainty: "",
+        hypotheses: [],
         feedback_mode: "none",
-        diagnosis: { bottleneck: "", confidence: "low", reasoning: [] },
+        diagnosis: EMPTY_DIAGNOSIS(),
         leadingHypothesis: null,
         ready_to_investigate_deeper: completeness.complete === true,
       };
     } else {
       // The button is only a phase transition, never a shortcut to a diagnosis.
       structured = { ...structured, ready_to_investigate_deeper: false };
+
+      if (!evidenceGateCompleted) {
+        // INVESTIGATE, but the evidence checks never finished (a state save
+        // failed or timed out first). The model's own diagnosis and
+        // feedback_mode are unverified claims — fail closed: no diagnosis,
+        // no confidence badge, and at most a plain signal if there's
+        // actually an insight to show.
+        console.warn("[chat] INVESTIGATE evidence gate did not complete — failing closed", { requestId });
+        const hasFinding = !!(structured.insight || structured.signal);
+        structured = {
+          ...structured,
+          diagnosis: EMPTY_DIAGNOSIS(),
+          leadingHypothesis: null,
+          feedback_mode: hasFinding && structured.feedback_mode !== "none" ? "signal" : "none",
+        };
+      }
     }
 
     console.log("[chat] request complete", { requestId, elapsedMs: elapsed(), engine: usedFallback ? "groq" : "gemini" });
@@ -1490,4 +1612,3 @@ export async function POST(request) {
 export async function GET() {
   return NextResponse.json({ status: "LifePath running — job search conversion intelligence" });
 }
-
