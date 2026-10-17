@@ -37,6 +37,32 @@ const getUsage = () => {
   return u;
 };
 
+// A server that crashes or times out (e.g. a Vercel function limit) can
+// answer with an HTML error page instead of JSON. Calling res.json() on that
+// throws a raw "Unexpected token <" error, which must never reach the user.
+const readJsonSafe = async (res) => {
+  try { return await res.json(); } catch { return null; }
+};
+
+// Turn any failure into a plain-language message that says what happened and
+// what to do next. Never shows raw technical errors; shows the server's own
+// reference ID only when the server actually returned one.
+const friendlyError = (err) => {
+  const ref = err?.requestId ? ` (Ref: ${err.requestId})` : "";
+  if (err?.name === "AbortError") {
+    return "That took too long to respond. Your conversation is saved. Please try again in a moment.";
+  }
+  if (err?.userMessage) return `${err.userMessage}${ref}`;
+  if (err instanceof TypeError) {
+    return "Couldn't reach LifePath. Please check your internet connection and try again. Your conversation is saved.";
+  }
+  return `Something went wrong on our side. Your conversation is saved. Please try again in a moment.${ref}`;
+};
+
+// Codes where the "start the investigation" button on the card is now stale
+// (the investigation already started, or the case isn't complete after all).
+const STALE_BUTTON_CODES = ["ALREADY_INVESTIGATING", "CASE_INCOMPLETE"];
+
 const MessageBubbleUser = ({ content, onEdit, disabled }) => {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(content || "");
@@ -101,7 +127,7 @@ const DIAGNOSIS_REASONS = [
   { id: "want_to_explain", label: "I want to explain what actually happened" },
 ];
 
-const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbError }) => {
+const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbError, isLatest = false, busy = false }) => {
   const [showReasons, setShowReasons] = useState(false);
   const [selectedReason, setSelectedReason] = useState("");
   const [correctionText, setCorrectionText] = useState("");
@@ -245,11 +271,17 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbE
           </div>
         )}
 
-        {ready_to_investigate_deeper && (
+        {/* The button only ever appears on the LATEST assistant card, so older
+            cards can't be used to start a second investigation. It means "I have
+            enough context to begin" — not "a diagnosis is ready". */}
+        {ready_to_investigate_deeper && isLatest && (
           <div style={{ padding: "12px 16px", borderTop: "1px solid rgba(255,255,255,.04)" }}>
-            <button onClick={onInvestigateDeeper}
-              style={{ width: "100%", padding: "12px", background: "rgba(99,102,241,.1)", border: "1px solid rgba(99,102,241,.3)", borderRadius: 12, color: "#818cf8", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
-              Yes, let's investigate further →
+            <div style={{ color: "#94a3b8", fontSize: 12, lineHeight: 1.6, marginBottom: 10 }}>
+              I now have the basics: your target role, location, experience and what has happened with your applications so far. Starting the investigation lets me test possible explanations and ask for specific evidence. It doesn't mean I have an answer yet.
+            </div>
+            <button onClick={onInvestigateDeeper} disabled={busy}
+              style={{ width: "100%", padding: "12px", background: "rgba(99,102,241,.1)", border: "1px solid rgba(99,102,241,.3)", borderRadius: 12, color: "#818cf8", fontWeight: 700, fontSize: 13, cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.5 : 1, fontFamily: "inherit" }}>
+              {busy ? "Starting..." : "I've shared enough. Start the investigation."}
             </button>
           </div>
         )}
@@ -362,6 +394,10 @@ export default function LifePath() {
   const [fbErrors, setFbErrors] = useState({});
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [clearing, setClearing] = useState(false);
+  // Errors from sending a message show here, NOT as chat messages — so they
+  // never get sent back to the AI as if LifePath had said them, and the
+  // conversation itself stays exactly as it was.
+  const [errorBanner, setErrorBanner] = useState("");
 
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
@@ -381,7 +417,7 @@ export default function LifePath() {
     return () => ts.forEach(clearTimeout);
   }, []);
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, loading]);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, loading, errorBanner]);
   useEffect(() => { if (messages.length > 0) S.set("lp_chat_history_v2", messages); }, [messages]);
 
   const startInvestigation = () => {
@@ -425,10 +461,10 @@ export default function LifePath() {
         if (fullText.trim().length > 80) {
           setCvFile({ name: file.name, text: fullText.trim() });
         } else {
-          setMessages((m) => [...m, { role: "assistant", content: "⚠️ This PDF doesn't appear to have readable text — it may be a scanned image. Please paste your CV text directly in the message box instead.", structured: null }]);
+          setMessages((m) => [...m, { role: "assistant", content: "⚠️ This PDF doesn't appear to have readable text — it may be a scanned image. Please paste your CV text directly in the message box instead.", structured: null, isError: true }]);
         }
       } catch {
-        setMessages((m) => [...m, { role: "assistant", content: "⚠️ Couldn't read that PDF. It may be corrupted or scanned. You can paste your CV text directly in the message box instead.", structured: null }]);
+        setMessages((m) => [...m, { role: "assistant", content: "⚠️ Couldn't read that PDF. It may be corrupted or scanned. You can paste your CV text directly in the message box instead.", structured: null, isError: true }]);
       } finally {
         setExtracting(false);
       }
@@ -442,20 +478,32 @@ export default function LifePath() {
         const text = ev.target.result;
         setExtracting(false);
         if (!text || text.trim().length < 30) {
-          setMessages((m) => [...m, { role: "assistant", content: "⚠️ Couldn't read that file. You can paste your CV text directly in the message box instead.", structured: null }]);
+          setMessages((m) => [...m, { role: "assistant", content: "⚠️ Couldn't read that file. You can paste your CV text directly in the message box instead.", structured: null, isError: true }]);
           return;
         }
         setCvFile({ name: file.name, text: text.trim() });
       };
       reader.onerror = () => {
         setExtracting(false);
-        setMessages((m) => [...m, { role: "assistant", content: "⚠️ File error. You can paste your CV text directly instead.", structured: null }]);
+        setMessages((m) => [...m, { role: "assistant", content: "⚠️ File error. You can paste your CV text directly instead.", structured: null, isError: true }]);
       };
       reader.readAsText(file);
       return;
     }
 
-    setMessages((m) => [...m, { role: "assistant", content: "⚠️ Please upload a PDF or TXT file — other formats aren't supported yet. You can paste your CV text directly instead.", structured: null }]);
+    setMessages((m) => [...m, { role: "assistant", content: "⚠️ Please upload a PDF or TXT file — other formats aren't supported yet. You can paste your CV text directly instead.", structured: null, isError: true }]);
+  };
+
+  // Hide the "start the investigation" button on the most recent assistant
+  // card. Used when the server says it is stale (already started / not
+  // complete). Saved into the message itself so it also survives a reload.
+  const hideStartButton = () => {
+    setMessages((m) => {
+      let idx = -1;
+      m.forEach((msg, i) => { if (msg.structured) idx = i; });
+      if (idx === -1) return m;
+      return m.map((msg, i) => (i === idx ? { ...msg, structured: { ...msg.structured, ready_to_investigate_deeper: false } } : msg));
+    });
   };
 
   const sendMessage = async (overrideText, baseMessages, requestAction = null) => {
@@ -475,9 +523,14 @@ export default function LifePath() {
     // `messages` closure from this render.
     const historyBase = baseMessages || messages;
 
-    const attachedCv = cvFile;
-    setInput("");
-    setCvFile(null);
+    // A button action never carries the typed text or an attached CV: those
+    // stay in the input box untouched.
+    const attachedCv = requestAction ? null : cvFile;
+    if (!requestAction) {
+      setInput("");
+      setCvFile(null);
+    }
+    setErrorBanner("");
 
     const MAX_HISTORY_MESSAGES = 12;
     const MAX_MESSAGE_CHARS = 1200;
@@ -487,8 +540,9 @@ export default function LifePath() {
       return text.length > max ? text.slice(0, max) + " ...[truncated]" : text;
     };
 
+    // Local warnings (isError) are UI-only; they are never sent to the AI.
     const fullApiMessages = historyBase
-      .filter(m => m.content || m.structured)
+      .filter(m => !m.isError && (m.content || m.structured))
       .map(m => ({
         role: m.role,
         content: truncate(m.content) || (m.structured
@@ -532,10 +586,18 @@ export default function LifePath() {
         body: JSON.stringify({ messages: apiMessages, userId: getUserId(), ...(requestAction ? { action: requestAction } : {}) }),
         signal: controller.signal,
       });
-      const data = await res.json();
-      if (data.error) {
-        const serverErr = new Error(data.message || "Connection error. Please retry.");
+      // A crashed or timed-out server can return an HTML page, not JSON.
+      const data = await readJsonSafe(res);
+      if (!data) {
+        const badResponse = new Error("non-json-response");
+        badResponse.userMessage = "The server sent back something unexpected. This usually means it was busy or timed out. Your conversation is saved. Please try again in a moment.";
+        throw badResponse;
+      }
+      if (data.error || !res.ok || !data.structured) {
+        const serverErr = new Error(data.message || "request-failed");
+        serverErr.userMessage = data.message || "Something went wrong on our side. Your conversation is saved. Please try again in a moment.";
         serverErr.requestId = data.requestId || null;
+        serverErr.code = data.code || null;
         throw serverErr;
       }
 
@@ -545,20 +607,24 @@ export default function LifePath() {
       };
       setMessages(m => [...m, aiMsg]);
     } catch (err) {
-      // Every failure should be traceable — show the reference ID whenever
-      // the server actually returned one. An AbortError means the client
-      // gave up before any response arrived at all, so there's genuinely no
-      // ID to show; say so plainly instead of fabricating one.
-      let message;
-      if (err?.name === "AbortError") {
-        message = "That took too long to respond. Please retry.";
-      } else {
-        message = err.message || "Connection error. Please retry.";
-        if (err?.requestId && !message.includes(err.requestId)) {
-          message += ` (Ref: ${err.requestId})`;
-        }
+      // Every failure should be traceable — the reference ID is shown only
+      // when the server actually returned one. A timeout means the client
+      // gave up before any response arrived, so there's genuinely no ID.
+      // Nothing technical is shown to the user; the conversation is kept.
+      setErrorBanner(friendlyError(err));
+
+      if (err?.code && STALE_BUTTON_CODES.includes(err.code)) hideStartButton();
+
+      if (!requestAction) {
+        // Take the failed message back out of the chat and put it (and any
+        // CV) back in the box, so the user can simply press send again
+        // without retyping and without a duplicate bubble.
+        setMessages(historyBase);
+        if (userMsg) setInput((prev) => prev || userMsg);
+        if (attachedCv) setCvFile(attachedCv);
       }
-      setMessages(m => [...m, { role: "assistant", content: `⚠️ ${message}`, structured: null }]);
+      // The failed attempt shouldn't use up one of the daily messages.
+      S.set("lp_usage", usage);
     } finally {
       clearTimeout(clientTimeout);
       setLoading(false);
@@ -613,6 +679,14 @@ export default function LifePath() {
     }
   };
 
+  // Starting the investigation. Guarded against double taps: nothing happens
+  // while another request is in flight, and the server also refuses a second
+  // start without calling the AI.
+  const handleStartInvestigation = () => {
+    if (loading || sendingRef.current) return;
+    sendMessage("", undefined, "begin_investigation");
+  };
+
   // True clear: resets the persisted server-side investigation state,
   // then clears local UI state. If the server reset fails, we tell the
   // user rather than silently pretending it worked.
@@ -624,22 +698,37 @@ export default function LifePath() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "clear_search", userId: getUserId() }),
       });
-      const data = await res.json();
-      if (data.error) throw new Error(data.message || "Could not reset your investigation.");
+      const data = await readJsonSafe(res);
+      if (!data) {
+        const badResponse = new Error("non-json-response");
+        badResponse.userMessage = "The server sent back something unexpected, so your investigation was not reset. Please try again in a moment.";
+        throw badResponse;
+      }
+      if (data.error || !res.ok) {
+        const serverErr = new Error(data.message || "reset-failed");
+        serverErr.userMessage = data.message || "Could not reset your investigation. Please try again.";
+        serverErr.requestId = data.requestId || null;
+        throw serverErr;
+      }
 
       setMessages([]);
       setFbStates({});
       setFbErrors({});
       setCvFile(null);
+      setErrorBanner("");
       S.set("lp_chat_history_v2", []);
       setShowClearConfirm(false);
     } catch (err) {
       setShowClearConfirm(false);
-      setMessages(m => [...m, { role: "assistant", content: `⚠️ ${err.message || "Could not fully reset. Please try again."}`, structured: null }]);
+      setErrorBanner(friendlyError(err));
     } finally {
       setClearing(false);
     }
   };
+
+  // Only the most recent assistant card may show the start button.
+  let lastStructuredIndex = -1;
+  messages.forEach((m, i) => { if (m.structured) lastStructuredIndex = i; });
 
   const CSS = `
     @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -698,7 +787,7 @@ export default function LifePath() {
             { title: "Find what's holding you back", desc: "See the patterns behind your missed responses and interviews." },
             { title: "Know what to change", desc: "Get a clear next move based on your actual job search — not generic advice." },
             { title: "Test what works", desc: "Make one change, track the result, and learn what improves your response rate." },
-            { title: "Turn your search into a system", desc: "LifePath remembers what you've tried and gets smarter about what works for you." },
+            { title: "Turn your search into a system", desc: "LifePath remembers what you've shared, so you don't have to repeat yourself." },
           ].map((f, i) => (
             <div key={i} style={{ display: "flex", gap: 12, padding: "14px 0", borderBottom: i < 3 ? "1px solid rgba(255,255,255,.05)" : "none" }}>
               <div style={{ width: 4, height: 4, borderRadius: "50%", background: "#6366f1", flexShrink: 0, marginTop: 8 }} />
@@ -712,7 +801,7 @@ export default function LifePath() {
           <div style={{ color: "#334155", fontSize: 10, fontWeight: 700, letterSpacing: 2, margin: "32px 0 16px" }}>HOW IT WORKS</div>
 
           <div style={{ padding: "16px", background: "rgba(255,255,255,.02)", border: "1px solid rgba(255,255,255,.06)", borderRadius: 16, marginBottom: 32 }}>
-            {["Tell us what you've been doing", "LifePath analyzes your search", "Finds the likely bottleneck", "Shows what to change next", "Track the result"].map((step, i, arr) => (
+            {["Tell us what you've been doing", "LifePath analyzes your search", "Looks into the possible reasons", "Shows what to change next", "Track the result"].map((step, i, arr) => (
               <div key={i}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <div style={{ width: 22, height: 22, borderRadius: "50%", background: "rgba(99,102,241,.15)", border: "1px solid rgba(99,102,241,.3)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -799,7 +888,9 @@ export default function LifePath() {
                   <InvestigationCard
                     key={i}
                     data={msg.structured}
-                    onInvestigateDeeper={() => sendMessage("", undefined, "begin_investigation")}
+                    isLatest={i === lastStructuredIndex}
+                    busy={loading}
+                    onInvestigateDeeper={handleStartInvestigation}
                     onFeedback={(payload) => handleFeedback(i, payload)}
                     fbState={fbStates[i] || "idle"}
                     fbError={fbErrors[i]}
@@ -825,6 +916,12 @@ export default function LifePath() {
           </div>
 
           <div style={{ flexShrink: 0, padding: "10px 13px 20px", background: "rgba(6,8,20,.97)", borderTop: "1px solid rgba(255,255,255,.04)" }}>
+            {errorBanner && (
+              <div role="alert" style={{ marginBottom: 9, padding: "9px 13px", background: "rgba(245,158,11,.08)", border: "1px solid rgba(245,158,11,.25)", borderRadius: 10, color: "#fbbf24", fontSize: 12, lineHeight: 1.6, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+                <span>⚠️ {errorBanner}</span>
+                <button onClick={() => setErrorBanner("")} aria-label="Dismiss" style={{ background: "none", border: "none", color: "#fbbf24", fontSize: 14, cursor: "pointer", flexShrink: 0 }}>✕</button>
+              </div>
+            )}
             {extracting && (
               <div style={{ marginBottom: 9, padding: "7px 13px", background: "rgba(99,102,241,.07)", border: "1px solid rgba(99,102,241,.2)", borderRadius: 10, color: "#818cf8", fontSize: 11 }}>
                 Reading your file...
@@ -868,4 +965,3 @@ export default function LifePath() {
     </div>
   );
 }
-
