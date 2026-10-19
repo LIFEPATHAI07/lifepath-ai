@@ -700,6 +700,7 @@ function computeDiagnosisEligibility(state, diagnosis) {
 
   return true;
 }
+
 // Backend, not the frontend, decides what feedback control (if any) renders.
 // The model's own feedback_mode is a claim, not a fact — downgrade it
 // whenever the server-verified state doesn't actually back it up.
