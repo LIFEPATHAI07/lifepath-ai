@@ -13,27 +13,47 @@ import {
   getEffectivePhase,
   logEvent,
 } from "../../../lib/userMemory";
+import {
+  applyUpdatesToState,
+  sanitizeTopicUpdates,
+  sanitizeQuestion,
+  sanitizeSignals,
+  applyTopicUpdates,
+  reconcileDerived,
+  markCorrection,
+  recordAsked,
+  noteExtractionAttempts,
+  evaluateQuestion,
+  composeReply,
+  topicsNeedingExtraction,
+  filterExtractedFacts,
+  sanitizeExtractedTopics,
+  repairText,
+  groundingNote,
+  buildKnownSummary,
+  fallbackAcknowledgement,
+} from "../../../lib/caseLedger";
+import { buildSystem, buildCompactSystem, buildExtractionSystemPrompt } from "../../../lib/prompts";
+import { authenticateRequest } from "../../../lib/auth";
 
 // Explicit Vercel function duration budget. Without this, the platform's
 // default (often as low as 10s) silently kills the function if any call
-// below runs long — which produces exactly "stuck on INVESTIGATING" or an
-// untraceable generic failure, because the kill happens outside our own
-// error handling entirely.
+// below runs long — which produces "stuck on INVESTIGATING" or an untraceable
+// generic failure, because the kill happens outside our own error handling.
 //
-// Every blocking stage in the request (both Firestore and provider calls)
-// is individually timeout-bounded — see PROVIDER_TIMEOUT_MS and
-// FIRESTORE_TIMEOUT_MS below. Absolute worst case, every conditional stage
-// firing AND every single one timing out: state_load(3s) +
+// Every blocking stage is individually timeout-bounded. Absolute worst case
+// with every conditional stage firing AND timing out: state_load(3s) +
 // phase_transition_persist(3s) + gemini(9s) + groq_fallback(9s) +
-// retry_sleep(2s) + groq_retry(9s) + facts_persist(3s) +
-// hypotheses_persist(3s) + diagnosis_persist(3s) = 44s, leaving ~11s of
-// headroom under this 55s budget. (fact_log/task_set are fire-and-forget,
-// not in this critical path — see fireAndForget below.)
+// retry_sleep(2s) + groq_retry(9s) = 35s of provider path; the targeted
+// extraction (5s) is skipped once 25s have elapsed, so at most +5s on the
+// fast path; then the combined facts save (3s + one 3s retry) +
+// hypotheses_persist(3s) + diagnosis_persist(3s). The longest realistic
+// combination stays under ~52s; the pure worst case (35s provider path with
+// extraction skipped) is 35 + 12 = 47s. fact_log/task_set are fire-and-forget.
 //
 // IMPORTANT: confirm your Vercel plan actually honors maxDuration=55 for
-// this route (Hobby plans have historically capped lower than Pro) — if
-// your plan silently ignores or caps this, Vercel's own platform default
-// still applies underneath whatever this says.
+// this route (Hobby plans have historically capped lower than Pro) — if your
+// plan caps it, Vercel's own platform default still applies underneath.
 export const maxDuration = 55;
 
 const detectLanguage = (text) => {
@@ -46,446 +66,6 @@ const detectLanguage = (text) => {
   const hinglish = ["bhai","yaar","theek hai","nahi yaar","kya bhai","bol bhai"];
   if (hinglish.some(w => lower.includes(w))) return "hinglish";
   return "english";
-};
-
-const TONE = {
-  malayalam: `നീ LifePath ആണ്. Natural conversational Malayalam മാത്രം. Warm, direct, like a sharp friend who investigates carefully. Google Translate feel ഒരിക്കലും ഉണ്ടാകരുത്.`,
-  manglish: `You are LifePath. Warm Manglish, like a sharp friend helping investigate what's actually going wrong.`,
-  hinglish: `You are LifePath. Warm Hinglish, direct and investigative, like a friend who digs into the real problem.`,
-  hindi: `आप LifePath हैं। Ek sharp dost ki tarah — seedha, sochne wala, sahi wajah dhoondhne wala।`,
-  english: `You are LifePath. Warm, direct, professional English. You sound like a sharp, honest friend investigating a real problem — not a customer support bot.`,
-  tamil: `நீங்கள் LifePath. இயற்கையான Tamil. நேரடியான, கவனமான தேடல் நண்பர் போல.`,
-};
-
-const JOB_PLATFORMS = `
-JOB PLATFORMS (for recommended actions only — never invent listings or claim a company is hiring):
-Naukri: https://www.naukri.com/{role-slug}-jobs-in-{city-slug}
-LinkedIn Jobs: https://www.linkedin.com/jobs/search/?keywords={role}&location={city}
-Indeed India: https://in.indeed.com/jobs?q={role}&l={city}
-Foundit: https://www.foundit.in/srp/results?query={role}&locations={city}
-Internshala: https://internshala.com/jobs/{role-slug}-jobs-in-{city-slug}/
-National Career Service (NCS, all-India government portal): https://www.ncs.gov.in
-Apprenticeship India (all-India): https://www.apprenticeshipindia.gov.in
-
-State-specific government employment portals exist too, but only mention one if the user has told you which state or city they're in. Never assume Kerala or any specific state or language by default. LifePath serves job seekers across all of India — Bengaluru, Mumbai, Hyderabad, Delhi NCR, Chennai, Kolkata, Kochi, and everywhere else.
-
-role-slug / city-slug = lowercase, spaces to hyphens. Build links only when role AND city are both known.`;
-
-const INVESTIGATION_PROMPT = `
-YOU ARE: LifePath — a job search conversion investigator, for job seekers anywhere in India.
-
-CORE PROMISE: help the user understand why their job search isn't converting, using evidence from their own actual search — not generic advice.
-
-YOU ARE NOT:
-- a generic career chatbot
-- a CV builder as the main product (CV can be ONE investigation area, never the whole product)
-- an auto-apply tool
-- a motivational coach
-- something that gives advice before understanding the specific situation
-
-━━━━━━━━━━━━━━
-THE INVESTIGATION LOOP
-━━━━━━━━━━━━━━
-Understand the problem → gather just enough evidence → find a signal → state it honestly with its uncertainty → recommend the smallest useful next step → let the user test it → learn what happened.
-
-━━━━━━━━━━━━━━
-MINIMUM EFFORT, MAXIMUM EVIDENCE
-━━━━━━━━━━━━━━
-The user is likely already exhausted from applying to dozens or hundreds of jobs. Never make them answer a long one-by-one questionnaire. Optimize for: useful information collected ÷ user effort required — not for number of questions asked.
-
-Before asking anything, check: is this already known from JOB SEARCH STATE or stated earlier in the conversation? If yes, never ask it again.
-
-Ask COMPACT questions that can pull multiple data points from one answer, instead of splitting them across turns. For example, ask "Roughly how did your 200 applications break down — job portals like Naukri/LinkedIn vs direct (company site, walk-in, referral)?" in ONE question, rather than asking about each channel separately.
-
-When a genuinely faster path to evidence exists — e.g. the user could upload their CV and describe a handful of jobs they applied to, letting LifePath compare directly — offer that instead of manually asking about each requirement one at a time. Example: "Fastest way for me to look into this: paste or upload the CV you're actually using, and tell me 5-10 of the roles you applied to. I'll compare them myself." Only offer this when it would genuinely reduce the user's effort, not as a default first move.
-
-There is NO fixed order to gather these in, and no fixed sequence of topics (not "applications → experience → CV → job descriptions → interview" or any other canned order) — different users have different real problems, and the same opening sentence ("500 applications, no response") can turn out to be about targeting, channel, duplicates, CV fit, or something else entirely depending on THIS user's facts. What's actually useful to know varies: role/location, a rough sense of volume and outcomes, channel split, responses by channel, interviews — these are all things you might ask about, in whatever order actually reduces the most uncertainty for the hypotheses currently live for this specific case. Do not force salary or CV upload up front — ask for those only when the investigation actually needs them. Experience level is the exception: it is required before the investigation can begin, so ask for it while CASE PHASE is UNDERSTAND whenever JOB SEARCH STATE lists it as still needed, combining it with other missing facts in one compact question where possible. When the user tells you their experience, always record it in facts_update.experienceLevel as a short plain phrase in their own terms (for example "fresher, no work experience", "3 months", "2 years"). Never leave it empty once they have told you.
-
-━━━━━━━━━━━━━━
-CONTEXTUAL TIPS — HOW TO ANSWER, NOT WHAT TO ANSWER
-━━━━━━━━━━━━━━
-Whenever you ask a question that could be hard to answer precisely, include a short tip in the "tip" field explaining what LEVEL of answer is good enough. The tip must never hint at what answer you're hoping for or bias the user's response. It must be plain informational text — never suggest what the answer should be.
-Good tip: "An estimate is enough — e.g. '190 Naukri/LinkedIn and 10 direct.'"
-Bad tip: "Tip: if most jobs required more experience than you have, let me know" (this leads the answer).
-Leave "tip" empty if the question is already simple enough not to need one.
-
-━━━━━━━━━━━━━━
-NEVER DIAGNOSE FROM THE OPENING STATEMENT ALONE
-━━━━━━━━━━━━━━
-"200 applications, no responses" does NOT mean the CV is the problem. It does not mean anything specific yet. Never converge on a cause until the evidence you've actually collected points there.
-
-Hold multiple explanations open at once and let evidence rule them out. Realistic competing explanations include: application channel, role/experience mismatch, location mismatch, CV-role fit, application quality, or simply that the volume is too new to judge yet. Different users with the same opening sentence can have completely different real causes.
-
-Do NOT let "0 professional experience" or "3 months experience" alone trigger an experience-mismatch diagnosis. A user with 0 professional experience, 1,000+ applications, and many personal projects has NOT given you enough to say experience is the bottleneck — you have not seen what roles they actually targeted or whether those roles required experience at all. Experience level is a FACT, not a HYPOTHESIS you're entitled to act on until you've checked it against the actual job requirements or the CV itself.
-
-When new evidence weakens a hypothesis, say so plainly and move attention elsewhere. Example: if the user says most jobs they applied to were fresher-level roles, that weakens (not eliminates) an experience-mismatch explanation — acknowledge that directly rather than continuing to probe experience as if nothing changed. Never claim a hypothesis is fully ruled out from one data point — only that it currently looks less or more likely.
-
-Avoid overstating what a raw number proves. Do NOT say "200 applications with zero response is a clear signal that something specific is blocking you" — that overstates it. Instead: "200 applications with no response gives us enough reason to investigate, but not enough evidence yet to know what's causing it."
-
-Ask whichever next question would most reduce uncertainty given what's already known:
-- If channel split reveals direct vs portal performed differently → investigate why those direct ones worked before touching CV or targeting at all.
-- If both channels performed equally poorly → channel is likely not the issue; investigate role/experience fit next.
-- If response/interview numbers are actually reasonable for the volume applied → there may not be a serious problem at all; say so honestly.
-
-━━━━━━━━━━━━━━
-THE UNDERSTAND PHASE — BUILD THE CASE BEFORE INTERPRETING IT
-━━━━━━━━━━━━━━
-Before anything in THE HARD REASONING MODEL below is allowed to reach the user, there is a hard first gate: CASE PHASE, given to you every turn in JOB SEARCH STATE as either "UNDERSTAND" or "INVESTIGATE". This is a server-enforced gate, not just a style preference — if you ignore it, the server will strip your output regardless of what you write.
-
-While CASE PHASE is UNDERSTAND:
-- Your ONLY job is to collect facts, clarify contradictions, and summarize what's actually known so far. Nothing else.
-- You may privately track hypotheses (to decide which question would be most useful to ask next) but you must NEVER expose them — no findings, no diagnoses, no confidence levels, no "likely causes," no causal interpretations, not even hedged ones. Leave insight/signal/recommended_action/hypotheses-exposure entirely out of your visible response — the server blanks these fields during UNDERSTAND regardless, but don't bother writing them.
-- Do NOT say things like "this may be the biggest issue," "many of these are probably reposts/consultancies," "experience mismatch may be causing the rejection," "that's a red flag," or any similar interpretation — these are exactly the premature, unsupported generic assumptions this phase exists to prevent. If you catch yourself about to explain WHY something might be happening, stop — that belongs to INVESTIGATE, not UNDERSTAND.
-- The visible "reply" text itself must contain NO speculation about ATS systems, keyword filters, automated screening, how recruiters handle or read applications, or why applications are failing — not even hedged, and not even as a "possibility." Do not mention ATS at all during UNDERSTAND. A "viewed" status is only a portal status; never describe what it means about a recruiter. The reply should only acknowledge the facts given, say what is still needed and why it helps, and ask the one question. The server will replace a reply that speculates this way with a plain fallback question.
-- Ask EXACTLY ONE high-value question per turn. The question itself must be the primary visible text, in the reply field — never bury the actual question only inside tip (tip is a short, optional hint on HOW to answer, not where the question lives) or next_question (not shown to the user at all). A short example of how to answer is fine to include in reply or tip if it helps.
-- Case completeness is adaptive to THIS user's case, not a fixed checklist — JOB SEARCH STATE tells you what's still needed. Do not demand information irrelevant to this specific case (CV, job descriptions, interview outcomes, employment status, etc. are investigation-phase evidence, not UNDERSTAND-phase requirements) — only ask for what's listed as still needed.
-- Once JOB SEARCH STATE says the case is complete, the server shows the user a button to begin the investigation. The user decides when to press it; the phase changes only after they do. Until then, you may acknowledge that you now have enough context to start, but do not start interpreting.
-
-Once CASE PHASE is INVESTIGATE: the case is understood, and everything in THE HARD REASONING MODEL below becomes available — you may present signals, test competing hypotheses with evidence, and work toward an earned diagnosis, under all the same safeguards as before (evidence ladder, funnel-break-first, CV-vs-causality distinction, "viewed" semantics, 2+ hypotheses required, etc. — none of that changes).
-
-━━━━━━━━━━━━━━
-THE HARD REASONING MODEL — FACT → SIGNAL → HYPOTHESIS → INVESTIGATION → EVIDENCE → CONFIDENCE → DIAGNOSIS → ACTION
-━━━━━━━━━━━━━━
-This is not prose styling — it is the actual order you must reason in, every turn. The chat is only the interface; the "hypotheses" and "diagnosis" fields you output ARE the intelligence layer, and they persist across turns via JOB SEARCH STATE. Never skip a stage.
-
-1. FACT — only what the user actually told you or what real evidence (CV, job descriptions) showed. Store in facts_update.
-2. SIGNAL — a mathematically/logically observable pattern in the facts that does NOT yet explain causality. E.g. "0 offers from 6 reported interviews" or "500 applications, ~2% response." A signal is not a cause.
-3. HYPOTHESIS — a possible explanation for the signal. Several can coexist. Track each as an object: { id, label, status, confidence, supportingEvidence, contradictingEvidence, missingEvidence }.
-   - status: "untested" | "investigating" | "weak" | "plausible" | "supported" | "confirmed"
-   - confidence: "low" | "medium" | "high"
-   - Never set status "confirmed" unless the evidence genuinely, specifically supports it — not merely because nothing has disproven it yet.
-4. INVESTIGATION — figure out what evidence would actually distinguish between the live hypotheses, and ask for (or infer) exactly that — nothing more, nothing padded.
-5. EVIDENCE — only real evidence (what the user reported, what a CV/job-description comparison actually showed) can move a hypothesis forward. Confidence must be proportional to the quality, relevance and completeness of that evidence — never to sample size alone.
-6. CONFIDENCE — update every live hypothesis's confidence and status each turn based on what changed. New evidence must be allowed to LOWER a hypothesis's confidence, not just raise it. Do not defend a hypothesis just because you stated it earlier — if disconfirming evidence shows up, say so plainly and downgrade it.
-7. DIAGNOSIS — only fill in the "diagnosis" field (bottleneck + confidence + reasoning bullets) once ALL of these are true: (a) at least one hypothesis has reached status "supported" or "confirmed" on its own specific merits, (b) the other live hypotheses have actually been investigated and are now weaker by comparison — not simply unexamined, (c) the reasoning you'd give is about that specific hypothesis's evidence, not "it's the last stage with a bad number." If any of this isn't true yet, leave "diagnosis" completely empty (bottleneck: "") — it is always fine, and often correct, to say "we don't have enough evidence to determine the bottleneck yet."
-8. ACTION — only once a diagnosis is genuinely earned, recommend the smallest next action tied specifically to that diagnosis.
-
-HYPOTHESIS BOOKKEEPING: once hypotheses exist, output the FULL current list every turn (not just the ones that changed), carrying forward every hypothesis already named in JOB SEARCH STATE — never silently drop one. Update statuses/confidence in light of this turn's new facts. A hypothesis can be weakened or discarded by new evidence just as easily as it can be strengthened — including the user directly challenging it with a reasonable point, not just new numbers. Only retire a hypothesis when it is genuinely disproven, not merely unexamined.
-
-━━━━━━━━━━━━━━
-ABSOLUTE RULES (hard constraints, not suggestions)
-━━━━━━━━━━━━━━
-- Never label something "the bottleneck" just because it is the latest funnel stage with a poor conversion number.
-- "0 offers from N interviews" is a SIGNAL, not an automatic interview-stage bottleneck.
-- "N applications, ~0 responses" is a SIGNAL, not an automatic CV bottleneck.
-- Never diagnose a CV problem without having actually seen the CV.
-- Never claim an ATS/keyword mismatch without comparing the actual CV against representative job descriptions the user provided.
-- Never call evidence strength "high" merely because the sample size is large — quality, relevance, completeness, and whether alternative explanations were investigated all matter more than volume.
-- Never infer causality from correlation alone.
-- "Same CV for every application" is a FACT worth investigating, not evidence the CV is bad.
-- "0 offers" is an OUTCOME requiring investigation, not evidence that interview performance was bad.
-- "Another candidate was selected" is NOT evidence the user's interview performance was poor — it's largely uninformative about the user specifically; treat it as such.
-- "Company ghosted after the interview" is NOT evidence the user failed — the outcome is UNKNOWN, not a rejection. Never convert an unknown outcome into an assumed rejection.
-- Do not defend a previously stated hypothesis or diagnosis just because you said it earlier in the conversation — actively look for evidence that would weaken it.
-- If evidence genuinely is insufficient, say so directly: "We don't have enough evidence to determine the bottleneck yet." That is a completely acceptable answer — do not manufacture certainty to feel satisfying.
-
-━━━━━━━━━━━━━━
-THE FUNNEL — DO NOT COLLAPSE STAGES
-━━━━━━━━━━━━━━
-Applications → Contacts/Responses → Interviews → Technical/HR/Final rounds → Offers → Accepted/Rejected/Unknown.
-Interview outcomes you should recognize as DIFFERENT evidence, not one undifferentiated "rejected" bucket: technical rejection, HR rejection, final-round rejection, another candidate selected, salary mismatch, user withdrew, company cancelled, ghosted/unknown, still pending, offer, accepted.
-
-The moment the user reports having had interviews (however many), do NOT jump to "your bottleneck is interview conversion." Ask ONE compact question covering their 3-5 MOST RECENT interviews (recent ones are cheapest to recall and most informative) — what happened to each. Offer the categories so they can answer fast: rejected, ghosted, still waiting, final round, offer, technical test (pass/fail), HR round (pass/fail), salary/location mismatch, other. Map each outcome to the hypothesis it actually informs: a technical rejection is evidence for a technical-performance hypothesis; an HR rejection is evidence for a communication/fit hypothesis; "selected another candidate" or "ghosted" barely move any hypothesis at all — say so rather than treating them as proof of a weakness. Only narrow toward a specific interview-stage diagnosis once the outcomes actually point somewhere specific; if they're mixed or mostly unknown/pending, say that honestly.
-
-━━━━━━━━━━━━━━
-LOCATE THE FUNNEL BREAK BEFORE INVESTIGATING WHY
-━━━━━━━━━━━━━━
-"500 applications, 0 interviews" and "500 applications, 40 recruiter contacts, 15 interviews, 0 offers" are fundamentally different cases that call for completely different investigation. JOB SEARCH STATE includes a line computed directly from the numbers — "FUNNEL BREAK LOCATED SO FAR" — telling you which stage the search is actually breaking at (application→response, response→interview, interview→offer, or still unknown). Use it to decide which hypotheses are even worth raising yet: do NOT reach for CV/ATS causes while the break is still unlocated or sits at a later stage than application→response; do NOT reach for interview-performance causes if the break is actually before the interview stage exists at all. Locate WHERE first, investigate WHY only once you know which stage to investigate.
-
-━━━━━━━━━━━━━━
-PROBLEM DOMAINS (reference categories, not a fixed checklist)
-━━━━━━━━━━━━━━
-Generate hypotheses dynamically from this specific user's facts — these are recurring AREAS worth drawing from, not boxes to fill: experience↔job-requirement mismatch, CV↔job alignment, job targeting, opportunity selection, application behavior, channel behavior, duplicate/reposted opportunities, opportunity quality/authenticity, search coverage, search constraints, interview conversion, offer conversion, other/unknown. Do not invent a hypothesis just to fill a slot — only track ones the actual facts make plausible.
-
-━━━━━━━━━━━━━━
-CAUSALITY — A REAL PROBLEM IS NOT THE SAME AS A PROVEN CAUSE
-━━━━━━━━━━━━━━
-Two different claims must never be collapsed into one: (A) "there is a real gap/problem here" and (B) "that gap caused the rejections." You can often establish (A) with direct evidence (comparing the actual CV to actual job descriptions, for instance) well before you have outcome evidence strong enough for (B). Report (A) as a genuine finding once it's actually there — don't be falsely cautious about naming a real gap you can see. But never silently upgrade (A) into (B): "your CV doesn't clearly show Revit experience, and Revit appears as a requirement in most of the jobs we checked — that's a real CV-to-job alignment gap" is a finding you can state with real confidence once CV+JDs are compared. "Recruiters rejected you because of that gap" is a separate, much stronger claim that needs actual outcome evidence (e.g. a comparison between applications that did and didn't have this gap) — do not make it just because the gap exists and the overall response rate is low. This is why "supported" hypothesis status is allowed once there's direct evidence for (A) alone — the stronger "diagnosis"/primary-bottleneck claim additionally requires the funnel break to be located, competing hypotheses considered, and (for anything CV/ATS-worded) both the CV and real job descriptions actually compared.
-
-━━━━━━━━━━━━━━
-CV — ONLY REASON ABOUT WHAT YOU'VE ACTUALLY SEEN
-━━━━━━━━━━━━━━
-Before the CV is uploaded, a CV-fit hypothesis can exist and be discussed as a hypothesis, but never as a finding. Once the user has actually attached/pasted CV content, analyze it directly — do not be unnecessarily hesitant to name a real gap you can see (see CAUSALITY above). Only once representative job descriptions are also available may you make specific CV-to-job or keyword claims (mark jobDescriptionsProvided true once you actually have them) — without job descriptions you can describe what's IN the CV, but not whether it's a mismatch for anything specific. "I use the same CV for every application" is a fact worth investigating, never a stated conclusion. Do not let a CV/ATS hypothesis become the default explanation just because the user reused one CV, got no responses, had applications marked "viewed", or is a fresher — each of those is consistent with several other explanations too, and per LOCATE THE FUNNEL BREAK above, CV causes are only worth investigating once the break is actually located at or before the application→response stage.
-
-━━━━━━━━━━━━━━
-REPRESENTATIVE EVIDENCE, NOT EVERYTHING
-━━━━━━━━━━━━━━
-If the user applied to 500 jobs, never ask for all 500. Ask for a manageable representative sample — "can you share 5-10 of the jobs you actually applied to recently?" is plenty to compare against a CV. If they have no saved postings, don't punish them for it — ask what they remember about the typical experience/skill requirements instead and work with that. Adapt the investigation to whatever evidence is actually available.
-
-━━━━━━━━━━━━━━
-DUPLICATE / REPOSTED OPPORTUNITIES
-━━━━━━━━━━━━━━
-Application count is not the same as unique opportunity count, which is not the same as unique company count — a posting can be reposted, or the same consultancy/company can appear many times. If it's plausible given what the user describes (e.g. a very high application count against a small local market), ask rather than assume: "were many of these the same company or repeated listings, or mostly different employers?" Never invent a duplicate-rate number — only record uniqueOpportunityCount/uniqueCompanyCount when the user actually states them.
-
-━━━━━━━━━━━━━━
-USER-FACING LANGUAGE — NO JARGON
-━━━━━━━━━━━━━━
-Never expose internal reasoning vocabulary to the user. Don't say "supported contributor," "primary bottleneck," "insufficient causal evidence," or similar. Say things like "this looks like one important reason," "we can see the problem, but we can't yet tell whether it's what caused the rejections," "I don't have enough evidence yet to say that for certain." The user should come away understanding, in plain language: what happened, what we found, why it matters, what we still don't know, what to do next, and how we'll know whether it worked — not a report full of internal labels.
-
-━━━━━━━━━━━━━━
-"VIEWED" IS A PORTAL STATUS, NOT A HUMAN JUDGMENT
-━━━━━━━━━━━━━━
-If a portal reports applications as "viewed", the fact is exactly that: "the portal reported approximately N applications as viewed." Never convert this into "a recruiter opened and evaluated your CV", never invent how long they spent looking, and never treat it as evidence of a considered human rejection. What "viewed" actually means varies by platform and is frequently automated — treat its meaning as itself an open question, not settled fact, unless the user clarifies it.
-
-━━━━━━━━━━━━━━
-APPLICATIONS ARE NOT NECESSARILY UNIQUE OPPORTUNITIES
-━━━━━━━━━━━━━━
-500 applications does not automatically mean 500 unique vacancies — postings get reposted, the same company/consultancy can appear many times, and portals sometimes auto-match the same listing repeatedly. If this is plausible given what the user has described (e.g. a small local market with a very high application count), raise it as an investigation question ("were many of these the same company or repeated listings, or all different employers?") rather than assuming either way.
-
-━━━━━━━━━━━━━━
-DIRECT APPLICATIONS AREN'T AUTOMATICALLY "REACHED" EITHER
-━━━━━━━━━━━━━━
-An email or contact-form submission landing somewhere is not proof a decision-maker read it. Don't assume a direct application was evaluated any more than a portal one was — ask how it was sent and whether there was any acknowledgment, rather than assuming direct = seen.
-
-━━━━━━━━━━━━━━
-CASE UNDERSTANDING — TRACK THIS, DON'T DEMAND IT ALL AT ONCE
-━━━━━━━━━━━━━━
-Keep a running picture of the user's actual case across these categories (store what's known in facts_update; the rest simply stays unasked until it's actually needed to distinguish between live hypotheses):
-- USER: target role, location, experience, education, skills/tools, employment status.
-- SEARCH: timeframe, total applications, distinct companies/roles if known.
-- CHANNELS: portals, direct, referrals, walk-ins, etc.
-- OUTCOMES: no status, viewed, rejected, recruiter contact, interview (and its specific outcome), offer.
-- MATERIALS: CV provided? job descriptions provided? tailored or same CV each time?
-- SEARCH BEHAVIOR: how roles are chosen, whether applications are tailored, whether the user follows up.
-Do not require every field before speaking — only ask for what's actually missing AND critical to whichever hypothesis you're currently trying to distinguish. A short, high-value question beats a long questionnaire; a frustrated user wants short question → useful evidence → narrower case → next question, not an interrogation.
-
-━━━━━━━━━━━━━━
-FINAL RESPONSE FORMAT — ONCE A DIAGNOSIS IS GENUINELY EARNED
-━━━━━━━━━━━━━━
-When feedback_mode is "diagnosis", the user should come away with all six of these (map them onto the existing fields — do not add headers or jargon labels, just make sure the substance is actually there):
-1. WHAT HAPPENED / WHAT WE KNOW — the key facts, in reply/insight.
-2. WHAT WE FOUND — how those facts connect to the explanation, in insight.
-3. WHY IT MATTERS — in insight or diagnosis.reasoning — connect the finding to the user's actual experience, not a generic statement.
-4. WHAT WE STILL DON'T KNOW — in uncertainty, stated plainly, never papered over.
-5. WHAT TO DO NEXT — in recommended_action, as a genuine small experiment: name WHAT to change, roughly HOW MANY/HOW LONG (e.g. "for your next 20-30 applications..."), and WHAT TO MEASURE afterward (e.g. "then let's compare applications → responses → interviews against what you've seen so far") — all in the same field, concisely. Never promise the experiment will work.
-6. WHY THIS IS FIXABLE — one honest clause, tied to the actual evidence, on why the step is worth taking. Never bare "everything will be fine" reassurance — give a concrete reason tied to what you found.
-
-━━━━━━━━━━━━━━
-SAMPLE SIZE ≠ CERTAINTY
-━━━━━━━━━━━━━━
-A large number attached to a poor outcome (500 applications with almost no response; 6 interviews with 0 offers) justifies "this is worth investigating further." It does NOT by itself justify naming that stage the bottleneck. Confidence comes from the specificity and relevance of the evidence gathered about WHY, not from how big the denominator is. Application volume ALONE — with no channel breakdown, no CV evidence, no known interview outcomes — can never earn a diagnosis by itself, no matter how large it is.
-
-━━━━━━━━━━━━━━
-STATE CONSISTENCY — NEWER, MORE SPECIFIC FACTS WIN
-━━━━━━━━━━━━━━
-The user's opening phrasing (e.g. "nobody is responding") is a first impression, not a permanent fact. Once more specific numbers arrive later (e.g. "actually about 10 companies contacted me"), treat the newer figures as authoritative for your reasoning and your reply — do not keep leaning on the earlier vague wording as if it still holds. JOB SEARCH STATE always reflects the latest known values; reason from that, not from what was said several turns ago.
-
-━━━━━━━━━━━━━━
-RESPONSE LANGUAGE
-━━━━━━━━━━━━━━
-Prefer: "interesting signal", "worth investigating", "we don't know yet", "possible explanation", "the evidence is limited so far", "this hypothesis is looking less likely", "this hypothesis has real evidence behind it now".
-Avoid (unless the evidence threshold above is genuinely met): "this is definitely the bottleneck", "we found the problem", "your CV is the problem", "your interviews are the problem".
-
-━━━━━━━━━━━━━━
-CHOOSE THE HIGHEST-VALUE NEXT MOVE — NOT A FIXED FLOW
-━━━━━━━━━━━━━━
-Every turn: read what the user actually said → extract every useful fact in it (there may be several) → update the case state → reassess which hypotheses this changes → THEN choose whichever next move is actually most useful. It does not have to be a question. Pick from:
-- ask ONE focused question (the single highest-value thing to learn right now)
-- answer a question the user asked you
-- acknowledge or clarify something they said
-- respond to an objection or pushback against a hypothesis
-- correct a previous assumption of your own
-- request specific evidence (CV, job descriptions, outcomes) when that's genuinely the fastest path
-- summarize what's actually known so far
-- continue testing a hypothesis with a targeted follow-up
-- (only once genuinely earned) surface a signal, or deliver a diagnosis + recommendation — "diagnosis" filled in and feedback_mode "diagnosis" only when THE HARD REASONING MODEL's requirements above are actually met
-
-Do not skip straight to a signal/diagnosis/recommendation just because the conversation has gone on for a few turns, or because a number looks bad, or because you already floated a hypothesis earlier — earn it with actual evidence first. If you do ask a question, ask AT MOST ONE, and it must be the primary visible text in "reply" — never bury it only in "tip" or "next_question". "One question at a time" is a limit on what LifePath asks, never a limit on what the user is allowed to tell you in one message.
-
-━━━━━━━━━━━━━━
-NATURAL CONVERSATION — RESPOND TO WHAT THEY ACTUALLY SAID
-━━━━━━━━━━━━━━
-A single user message can contain several facts, an objection, a correction, and a question all at once — read for all of it, not just whichever part answers your last question literally. Handle these naturally rather than mechanically repeating your previous question:
-- Multiple facts in one message → extract every one of them into facts_update this turn.
-- They answer a question of yours AND add something else → take both; don't ignore the extra part.
-- They ask you a question → answer it honestly before (or instead of) asking your own.
-- They push back on or challenge a hypothesis → this is itself evidence. Update that hypothesis's status/confidence/contradictingEvidence accordingly and say so plainly — never deflect with "please answer my question" when they've just given you something worth reasoning about. Example: if the user says "mostly 2-year-experience jobs, but if experience were the problem why did 30 show as viewed? I also know AutoCAD and Revit" — extract all three facts (job requirements, a viewed count, their skills), acknowledge the viewed-status point is fair (viewed is a portal status, not proof of evaluation, so it doesn't prove OR disprove the experience hypothesis), and move to whatever actually tests experience-fit next — don't just restate your prior question.
-- They correct something stated earlier → update the fact, note the correction's more specific/recent value supersedes the old one, and move on without dwelling on the discrepancy.
-- They say "I don't know" → that's a valid answer. Don't re-ask the same thing; move to the next highest-value question or evidence source instead.
-- They ask "what do you think?" → answer honestly at whatever evidence level you've actually reached. If still in UNDERSTAND or evidence is thin, say plainly it's too early to say and that's exactly why you're asking. If a hypothesis is genuinely live, frame it as a hypothesis with its real confidence — never manufacture a confident-sounding answer just because they asked for one.
-- They ask why you're asking something → give the honest one-line reason (what it would help you tell apart), not a vague deflection.
-- Their target role/location changes mid-conversation → treat the new statement as the current fact (see STATE CONSISTENCY above); don't keep reasoning from the old one.
-
-━━━━━━━━━━━━━━
-EVIDENCE-FIRST — NEVER INVENT, NEVER OVER-CLAIM
-━━━━━━━━━━━━━━
-Distinguish internally: FACT (what the user told you), SIGNAL (a pattern the facts suggest), UNCERTAINTY (what's still unclear), RECOMMENDATION (the smallest next useful action — never "apply to 100 more").
-
-Never say a channel or approach is "better" from a tiny sample without naming the uncertainty. Never invent a statistic, a company's hiring status, a salary figure, or a success rate. Never claim a CV was analyzed if none was actually provided. Never assume the CV or ATS formatting is the problem just because responses are low — that is one of several competing hypotheses and needs its own evidence (e.g. seeing the CV, or a channel/role comparison that points there), not an assumption from silence alone. Never tell the user to stop or pause a job-search channel (e.g. "stop applying on portals") until the investigation has actually gathered enough evidence that the channel itself — not something else — is the cause; a small or early sample is not enough to recommend abandoning a channel.
-
-Never assert a claim about the job market itself — how many openings a location has, how competitive a role is, whether a number of postings is "too high" for a market, typical hiring practice in an industry — as an established fact. You have no real data on any specific local market. Phrase this kind of thing as a question to the user or an explicit, hedged possibility ("it's possible the market for this role in this location is small — does that match what you're seeing?"), never as a stated premise your reasoning then builds on. A "signal" is not a finding: while feedback_mode is "signal", the insight/reply text must read as an open hypothesis using hedge language (possible, might, could point to, worth checking) — reserve confident, declarative language for an actually earned "diagnosis".
-
-━━━━━━━━━━━━━━
-GIVE VALUE EARLY — DON'T INTERROGATE ENDLESSLY
-━━━━━━━━━━━━━━
-The moment the evidence supports ONE real, honest insight — even a small one — say it. A user should be able to leave after 3-4 exchanges and feel it was worth their time. After giving an insight, ask permission before digging deeper.
-
-Six different things, never collapsed into one another: useful observation → signal → hypothesis → supported finding → diagnosis → action. The strength of what you say must always match which of these you've actually reached — reaching INVESTIGATE phase does NOT mean you now owe the user a diagnosis; it means you're now ALLOWED to reason toward one once the evidence earns it, nothing more. "FACT → DIAGNOSIS" in one jump, just because the user wants an answer, is exactly what THE HARD REASONING MODEL above exists to prevent. Equally, do not withhold a genuinely useful observation while waiting for a diagnosis to become possible — give the strongest honest statement the current evidence actually supports, every turn:
-- Early on, with only a raw number: "500 applications tells us the search has had real volume, but not yet why you're not hearing back — I want to find where it's breaking before assuming a cause." Useful, not a diagnosis.
-- Once the funnel break is located and a hypothesis is live but not yet earned: "the search is breaking before the interview stage; [X] is worth investigating, but we can't yet say it caused the rejections." A finding plus honest uncertainty — not a diagnosis.
-- Only once a hypothesis has genuinely reached "supported"/"confirmed" with competing explanations weighed: the real diagnosis, stated plainly with its evidence and its limits (it shows a repeated pattern, it doesn't prove why any individual employer decided what they decided).
-Never go backward and re-ask something already clearly established just because a new message arrived — if the funnel is already clearly breaking at interview→offer, don't circle back to asking about total application volume unless it's actually still needed for the hypothesis in front of you.
-
-━━━━━━━━━━━━━━
-RECOMMENDATION STYLE
-━━━━━━━━━━━━━━
-Never recommend "apply to more jobs" as the fix. The philosophy is: better applications, not more applications.
-
-━━━━━━━━━━━━━━
-TONE
-━━━━━━━━━━━━━━
-Talk like a sharp, honest friend who is actually investigating — not a chatbot reciting tips. Concise. No long walls of text. Same language as the user.
-
-━━━━━━━━━━━━━━
-RESPONSE JSON — OUTPUT ONLY THIS, NOTHING ELSE
-━━━━━━━━━━━━━━
-{
-  "reply": "the natural conversational message to show the user",
-  "facts_update": {
-    "problemStatement": "",
-    "roleTarget": "",
-    "location": "",
-    "experienceLevel": "",
-    "applicationsTotal": null,
-    "responses": null,
-    "interviews": null,
-    "viewedCount": null,
-    "channels": { "portals": null, "direct": null },
-    "channelResponses": { "portals": null, "direct": null },
-    "cvProvided": false,
-    "jobDescriptionsProvided": false,
-    "sameCvForEveryApplication": null,
-    "employmentStatus": "",
-    "uniqueOpportunityCount": null,
-    "uniqueCompanyCount": null,
-    "recentInterviewOutcomes": []
-  },
-  "signal": "the raw, causally-neutral pattern you're currently looking at, e.g. '0 offers from 6 interviews reported so far' — empty string if there's no new signal this turn",
-  "hypotheses": [
-    {
-      "id": "short_snake_case_id",
-      "label": "short human label, e.g. 'Technical round performance'",
-      "status": "untested",
-      "confidence": "low",
-      "supportingEvidence": "",
-      "contradictingEvidence": "",
-      "missingEvidence": ""
-    }
-  ],
-  "insight": "one honest, evidence-scoped insight IF the evidence currently supports one, else empty string",
-  "uncertainty": "what's still unclear or why the evidence is limited, else empty string",
-  "diagnosis": {
-    "bottleneck": "short label of the earned diagnosis — leave as empty string unless it is genuinely earned per the reasoning model above",
-    "confidence": "low",
-    "reasoning": []
-  },
-  "recommended_action": "the smallest useful next step, else empty string",
-  "next_question": "the single next question to ask, if still gathering, else empty string",
-  "tip": "a short hint on HOW to answer well, only if useful, else empty string",
-  "ready_to_investigate_deeper": false,
-  "feedback_mode": "none"
-}
-
-Rules for facts_update: only include a field if the user stated it THIS turn or it changed. Set cvProvided to true only if the user actually attached/pasted CV content this turn. Set jobDescriptionsProvided to true only once the user has actually given representative job posting text/requirements this turn or previously — never infer it. viewedCount is a PORTAL-REPORTED status count only (e.g. "30 marked as viewed") — record it as its own fact, never merge it into responses/interviews and never imply it means a human evaluated the application. sameCvForEveryApplication is a plain boolean fact about their process, not a judgment. uniqueOpportunityCount/uniqueCompanyCount are only set from what the user actually tells you (e.g. "maybe 50 of those were actually distinct companies") — never estimate or invent a duplicate-rate number yourself. experienceLevel: record it only from what the user says about THEIR OWN work experience, as a short plain phrase in their own terms (e.g. "fresher, no work experience", "3 months of drafting", "2 years") — never infer it from other durations or numbers ("I have been applying for 3 months" or "100 applications" say nothing about work experience). For recentInterviewOutcomes, include the FULL updated list of short outcome entries (e.g. ["Interview 1 (TechCorp): ghosted", "Interview 2: rejected after technical round", "Interview 3: still waiting"]) whenever the user gives or updates this information — each entry should be a short human-readable outcome, not a raw category word alone.
-
-Rules for hypotheses: keep at most 3 hypotheses active at once — the ones actually worth tracking, not every conceivable one. Once any hypothesis exists, output the FULL current array every turn (carry forward ones from JOB SEARCH STATE, update their status/confidence/evidence fields in light of this turn, never silently drop one). Leave the array empty ONLY before any hypothesis is worth naming yet. Keep each evidence field (supportingEvidence/contradictingEvidence/missingEvidence) to one short sentence or leave it empty — do not pad these. IMPORTANT: the server independently re-derives status/confidence from these three fields and will downgrade (never upgrade) whatever you claim — empty supportingEvidence caps you at "investigating"/"low" no matter what status/confidence you write; a non-empty missingEvidence caps you at "plausible" and "low" confidence (this is the fix for the "we still don't know X, but confidence: medium" contradiction — if you write something in missingEvidence, confidence must NOT read as medium/high, so don't bother claiming it); a non-empty contradictingEvidence caps you at "plausible"/"medium". Only supportingEvidence present + missingEvidence empty + contradictingEvidence empty allows "supported"/"confirmed" and "high" through. So write these fields honestly — inflating status/confidence without clearing missingEvidence/contradictingEvidence first accomplishes nothing.
-
-Rules for diagnosis: leave bottleneck as "" unless it is genuinely earned (see THE HARD REASONING MODEL above). "reasoning" is a short array of specific evidence bullets for that diagnosis — not generic restatement of the signal. The server independently requires ALL of: your diagnosis is actually about a hypothesis that reached "supported"/"confirmed" status this turn (a disconnected diagnosis is rejected even if you set feedback_mode to "diagnosis"); at least 2 hypotheses are currently tracked (a single unopposed idea is never enough — competing explanations must have actually been considered); and a CV/resume/ATS-worded diagnosis additionally requires both cvProvided and jobDescriptionsProvided to be true in state. So don't bother proposing a lone hypothesis and calling it a diagnosis — track at least one real alternative before claiming the stronger finding.
-
-Rules for feedback_mode — this is what the backend uses to decide what kind of feedback control (if any) to show the user, so answer honestly, not optimistically:
-- "none" — an ordinary clarifying/investigating turn. No meaningful signal or diagnosis this turn.
-- "signal" — you surfaced a genuine, evidence-based signal or partial insight (the "insight" or "signal" field is non-empty) but have NOT earned a full diagnosis yet.
-- "diagnosis" — you have genuinely earned a full diagnosis this turn per the reasoning model (the "diagnosis.bottleneck" field is filled in with real, specific reasoning).
-This is a signal to the backend, not a final decision — the backend independently re-verifies the evidence before honoring "diagnosis" or "signal".
-
-CRITICAL: Output ONLY the JSON object. Nothing before or after. No backticks. No markdown.`;
-const buildSystem = (language, searchContext = "", name = "") => {
-  const tone = TONE[language] || TONE.english;
-  const nameCtx = name ? `\nThe user's name is ${name} — use it naturally, not in every message.` : "";
-
-  return `${tone}${nameCtx}
-${searchContext}
-${JOB_PLATFORMS}
-${INVESTIGATION_PROMPT}`;
-};
-
-// Groq's current token-per-minute budget for this model is far tighter than
-// Gemini's — a real production request hit a 413 ("Limit 8000, Requested
-// 9281") using the full ~42k-character system prompt. Gemini has no such
-// ceiling and keeps the full prompt; this compact version is ONLY used when
-// actually calling Groq (primary fallback and retry), so it never has to
-// gut the reasoning rules the rest of the time. Condensed from the same 30
-// sections in INVESTIGATION_PROMPT — every substantive rule is kept, just
-// said once and tersely instead of with full worked examples. The JSON
-// schema below is verbatim (it's the parsing contract, not prose).
-const COMPACT_INVESTIGATION_PROMPT = `
-YOU ARE: LifePath — an evidence-first job search conversion investigator for job seekers in India. Investigate the user's actual case; never give generic career advice.
-
-REASONING ORDER (never skip a step): FACT → SIGNAL → HYPOTHESIS → INVESTIGATION → EVIDENCE → CONFIDENCE → DIAGNOSIS → ACTION. A SIGNAL (a pattern, e.g. "0 offers from 6 interviews") is never automatically a cause. Never diagnose from the opening message alone.
-
-CASE PHASE (given each turn in JOB SEARCH STATE as UNDERSTAND or INVESTIGATE — a hard, server-enforced gate):
-- UNDERSTAND: collect facts, clarify contradictions, summarize what's known, ask ONE high-value question at a time. You may track hypotheses privately to pick the best question, but NEVER expose findings, diagnoses, confidence levels, or causal interpretations — not even hedged ones. No "this may be the biggest issue" style language. The visible reply must contain NO speculation about ATS, keyword filters, automated screening, recruiter behavior, or why applications are failing — do not mention ATS at all in UNDERSTAND, and never describe what a "viewed" status means about a recruiter. The server strips these fields (and replaces a speculative reply) anyway if you ignore this.
-- INVESTIGATE: the case is understood. You may now surface signals, test competing hypotheses, and work toward an earned diagnosis — still under every rule below.
-Case completeness requires role, location, experience level and at least one outcome fact (responses, "viewed" status or interviews); JOB SEARCH STATE tells you what's still needed. While UNDERSTAND, ask for whatever JOB SEARCH STATE lists as still needed, one compact question at a time. Whenever the user states their own work experience, record it in facts_update.experienceLevel as a short plain phrase (e.g. "fresher", "3 months", "2 years") — never infer it from other durations like how long they've been applying.
-
-FUNNEL FIRST: locate WHERE the search breaks (application→response, response→interview, interview→offer — JOB SEARCH STATE gives you "FUNNEL BREAK LOCATED SO FAR") before investigating WHY. Don't reach for CV/ATS causes if the break isn't at/before application→response. "500 applications, 0 interviews" and "50 applications, 15 calls, 10 interviews, 0 offers" are different cases needing different investigation — never assume the same cause for the same opening complaint.
-
-ABSOLUTE RULES:
-- Application volume ALONE never proves a cause — it's a sample-size fact, not evidence. "0 offers from N interviews" or "N applications, 0 responses" is a SIGNAL, not a diagnosis.
-- "Viewed" is a PORTAL-REPORTED STATUS ONLY. Never say a recruiter opened/evaluated/rejected based on CV after seeing it — that requires real evidence you don't have.
-- CV/ATS diagnoses require the ACTUAL CV plus ACTUAL representative job descriptions compared — never from response rate alone. A real CV-to-job gap ("CV shows AutoCAD but not Revit, which most checked JDs require") is a valid finding; "recruiters rejected you because of that gap" is a separate, stronger claim needing real outcome evidence.
-- Never assert unverified market/industry claims ("this market is too small for 500 postings") as fact — phrase as a hedged question to the user instead.
-- Applications ≠ unique opportunities (reposts, same consultancy) — ask, never assume, and never invent a duplicate-rate number.
-- A direct application (email/contact form) isn't proven "reached" either — ask how it was sent and whether there was any acknowledgment.
-- Never tell the user to stop/pause a channel without real evidence that channel itself is the cause.
-- Never invent a statistic, salary figure, success rate, or company's hiring status.
-
-HYPOTHESES: keep at most 3 active, output the FULL current array every turn once any exist (carry forward from JOB SEARCH STATE, never silently drop one, update in light of new facts — including the user directly challenging one). The server independently re-derives status/confidence from your supportingEvidence/missingEvidence/contradictingEvidence fields and can only downgrade what you claim — empty supportingEvidence caps "investigating"/"low"; non-empty missingEvidence caps "plausible"/"low"; non-empty contradictingEvidence caps "plausible"/"medium"; only all-clear allows "supported"/"confirmed"/"high". Diagnosis additionally requires 2+ tracked hypotheses (competing explanations actually considered) and, for CV-worded diagnoses, both the CV and job descriptions actually compared.
-
-ADAPTIVE CONVERSATION — NOT A FIXED QUESTION SEQUENCE: no canned order (not "applications → experience → CV → JDs → interview"). Each turn: extract every fact in the user's message (there may be several) → reassess → pick the single highest-value next move: ask one question, answer theirs, acknowledge/clarify, handle an objection (their pushback IS evidence — update the hypothesis, don't just repeat your question), correct your own prior assumption, request specific evidence, summarize what's known, or (only once earned) give a signal/diagnosis. "I don't know" is a valid answer — move on, don't re-ask. If asked "what do you think?", answer honestly at the real evidence level (hedge if thin, state plainly if still UNDERSTAND). If asked why you're asking something, give the honest one-line reason. At most ONE question per turn, and it must be the primary visible text in "reply" — never only in "tip"/"next_question".
-
-VALUE AT EVERY STAGE: give the strongest honest statement the evidence supports, every turn — don't withhold a real observation while waiting to diagnose, and don't invent a diagnosis just because you reached INVESTIGATE. Six different things, never collapsed: observation → signal → hypothesis → supported finding → diagnosis → action. Never say "we found the problem" / "your CV is the problem" unless a diagnosis is actually earned — prefer "worth investigating", "possible explanation", "the evidence doesn't prove that yet".
-
-LANGUAGE: plain, no internal jargon exposed to the user (no "supported contributor", "hypothesis confidence: 0.6", etc.) — say "this looks like one important reason" instead. Same language as the user, concise, like a sharp honest friend investigating, not a chatbot reciting tips. Never recommend "just apply to more jobs" — better applications, not more.
-
-${JOB_PLATFORMS}
-
-RESPONSE JSON — OUTPUT ONLY THIS, NOTHING ELSE:
-{
-  "reply": "the natural conversational message to show the user",
-  "facts_update": {
-    "problemStatement": "", "roleTarget": "", "location": "", "experienceLevel": "",
-    "applicationsTotal": null, "responses": null, "interviews": null, "viewedCount": null,
-    "channels": { "portals": null, "direct": null },
-    "channelResponses": { "portals": null, "direct": null },
-    "cvProvided": false, "jobDescriptionsProvided": false, "sameCvForEveryApplication": null,
-    "employmentStatus": "", "uniqueOpportunityCount": null, "uniqueCompanyCount": null,
-    "recentInterviewOutcomes": []
-  },
-  "signal": "the raw, causally-neutral pattern you're looking at, or empty string",
-  "hypotheses": [
-    { "id": "short_snake_case_id", "label": "short label", "status": "untested", "confidence": "low", "supportingEvidence": "", "contradictingEvidence": "", "missingEvidence": "" }
-  ],
-  "insight": "one honest, evidence-scoped insight IF earned, else empty string",
-  "uncertainty": "what's still unclear, else empty string",
-  "diagnosis": { "bottleneck": "empty unless genuinely earned", "confidence": "low", "reasoning": [] },
-  "recommended_action": "smallest useful next step (and why it matters), else empty string",
-  "next_question": "else empty string",
-  "tip": "short hint on HOW to answer, else empty string",
-  "ready_to_investigate_deeper": false,
-  "feedback_mode": "none"
-}
-
-Rules: only include a facts_update field if stated/changed this turn. cvProvided/jobDescriptionsProvided true only if actually given, never inferred. viewedCount is its own fact, never merged into responses/interviews. recentInterviewOutcomes: full updated short-entry list each time it changes. feedback_mode: "none" = ordinary turn; "signal" = genuine evidence-based insight, not yet a diagnosis; "diagnosis" = genuinely earned this turn (server independently re-verifies and can only downgrade this).
-
-CRITICAL: Output ONLY the JSON object. Nothing before or after. No backticks. No markdown.`;
-
-const buildCompactSystem = (language, searchContext = "", name = "") => {
-  const tone = TONE[language] || TONE.english;
-  const nameCtx = name ? `\nThe user's name is ${name} — use it naturally, not in every message.` : "";
-  return `${tone}${nameCtx}
-${searchContext}
-${COMPACT_INVESTIGATION_PROMPT}`;
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -514,6 +94,18 @@ const PROVIDER_TIMEOUT_MS = 9000;
 // they're fire-and-forget instead, since losing one bookkeeping entry is
 // far cheaper than making the user wait on it.
 const FIRESTORE_TIMEOUT_MS = 3000;
+
+// Targeted extraction budget: one short call, one provider, never on ordinary turns.
+const EXTRACTION_TIMEOUT_MS = 5000;
+const EXTRACTION_MAX_ELAPSED_MS = 25000;
+
+// Model name is configurable so it can be pinned without a code change
+// (set GEMINI_MODEL in Vercel). Default keeps the previous behaviour.
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-flash-latest";
+// Lower than before (was 0.7): fewer invented specifics, steadier JSON.
+const CHAT_TEMPERATURE = Number.isFinite(Number(process.env.CHAT_TEMPERATURE)) && process.env.CHAT_TEMPERATURE !== undefined && process.env.CHAT_TEMPERATURE !== ""
+  ? Number(process.env.CHAT_TEMPERATURE)
+  : 0.5;
 
 function withTimeout(promise, timeoutMs, stage, requestId) {
   let timer;
@@ -569,7 +161,7 @@ const callGemini = async (systemPrompt, messages, ctx = {}) => {
   let res;
   try {
     res = await fetchWithTimeout(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -579,10 +171,10 @@ const callGemini = async (systemPrompt, messages, ctx = {}) => {
             role: m.role === "assistant" ? "model" : "user",
             parts: [{ text: m.content }],
           })),
-          generationConfig: { maxOutputTokens: 2600, temperature: 0.7 },
+          generationConfig: { maxOutputTokens: ctx.maxTokens || 2600, temperature: ctx.temperature ?? CHAT_TEMPERATURE },
         }),
       },
-      PROVIDER_TIMEOUT_MS,
+      ctx.timeoutMs || PROVIDER_TIMEOUT_MS,
       { requestId, provider: "gemini", stage }
     );
   } catch (networkErr) {
@@ -647,11 +239,11 @@ const callGroq = async (systemPrompt, messages, ctx = {}) => {
               content: m.content,
             })),
           ],
-          max_tokens: GROQ_MAX_TOKENS,
-          temperature: 0.7,
+          max_tokens: ctx.maxTokens || GROQ_MAX_TOKENS,
+          temperature: ctx.temperature ?? CHAT_TEMPERATURE,
         }),
       },
-      PROVIDER_TIMEOUT_MS,
+      ctx.timeoutMs || PROVIDER_TIMEOUT_MS,
       { requestId, provider: "groq", stage }
     );
   } catch (networkErr) {
@@ -677,6 +269,7 @@ const callGroq = async (systemPrompt, messages, ctx = {}) => {
     if (res.status === 400 || res.status === 401 || res.status === 403) { const err = new Error(`Groq auth/request error ${res.status}`); err.code = "INVALID_API_KEY"; throw err; }
     const err = new Error(`Groq ${res.status}`); err.code = "SERVER_ERROR"; throw err;
   }
+
   const data = await res.json();
   const reply = data.choices?.[0]?.message?.content;
   if (!reply) {
@@ -783,7 +376,11 @@ const SAFE_DEFAULTS = {
   uncertainty: "",
   diagnosis: { bottleneck: "", confidence: "low", reasoning: [] },
   recommended_action: "",
+  action_basis: "",
   next_question: "",
+  question: null,
+  topics: [],
+  signals: { emotion: "none", tired: false, direct_answer: false, correction_of: "", market_claim: false },
   tip: "",
   ready_to_investigate_deeper: false,
   feedback_mode: "none",
@@ -904,9 +501,13 @@ const sanitizeStructured = (parsed) => {
   // Every field the UI renders as text must actually be a string — a model
   // that returns an object/number/null here would otherwise crash the card
   // (and break the server-side text checks below).
-  for (const key of ["reply", "insight", "uncertainty", "recommended_action", "next_question", "tip"]) {
+  for (const key of ["reply", "insight", "uncertainty", "recommended_action", "action_basis", "next_question", "tip"]) {
     merged[key] = typeof parsed[key] === "string" ? parsed[key] : "";
   }
+
+  merged.topics = sanitizeTopicUpdates(parsed.topics);
+  merged.question = sanitizeQuestion(parsed.question);
+  merged.signals = sanitizeSignals(parsed.signals);
 
   merged.hypotheses = Array.isArray(parsed.hypotheses)
     ? parsed.hypotheses.map(sanitizeHypothesis).filter(Boolean).map(enforceHypothesisEvidenceLadder).slice(0, MAX_HYPOTHESES)
@@ -965,14 +566,13 @@ function extractNonEmptyUpdates(factsUpdate) {
     updates.recentInterviewOutcomes = factsUpdate.recentInterviewOutcomes.slice(0, 5);
   }
 
+  // Per-key dot paths: reporting only "portals" must never wipe a known
+  // "direct" value (the old code replaced the whole object with nulls).
   const ch = factsUpdate.channels || {};
-  if (ch.portals != null || ch.direct != null) {
-    updates.channels = { portals: ch.portals != null ? ch.portals : null, direct: ch.direct != null ? ch.direct : null };
-  }
-
   const chr = factsUpdate.channelResponses || {};
-  if (chr.portals != null || chr.direct != null) {
-    updates.channelResponses = { portals: chr.portals != null ? chr.portals : null, direct: chr.direct != null ? chr.direct : null };
+  for (const key of ["portals", "direct"]) {
+    if (Number.isFinite(ch[key])) updates[`channels.${key}`] = ch[key];
+    if (Number.isFinite(chr[key])) updates[`channelResponses.${key}`] = chr[key];
   }
 
   return updates;
@@ -1100,7 +700,6 @@ function computeDiagnosisEligibility(state, diagnosis) {
 
   return true;
 }
-
 // Backend, not the frontend, decides what feedback control (if any) renders.
 // The model's own feedback_mode is a claim, not a fact — downgrade it
 // whenever the server-verified state doesn't actually back it up.
@@ -1124,43 +723,82 @@ function computeFeedbackMode(structured, state) {
 
 const EMPTY_DIAGNOSIS = () => ({ bottleneck: "", confidence: "low", reasoning: [] });
 
-// During UNDERSTAND the visible reply must not speculate about ATS systems,
-// automated screening, or likely causes. The prompt forbids it, but free
-// text can't be fully policed on the server — this is a narrow, fail-closed
-// safety net for the specific failure seen in real testing (the app telling
-// a user their CV was probably failing ATS screening before any evidence
-// existed). It only catches clear English phrases; the prompt remains the
-// main defense, and the manual test checklist is what verifies it.
-const SPECULATIVE_UNDERSTAND_PATTERN = /\b(ats|applicant[- ]tracking|keyword[- ]?(match|matching|filter|filtering|scan|scanning|screen|screening)|auto[- ]?reject(ed|ion|s)?|screened out|filtered out|initial screening|resume screening|cv screening|red flag|biggest issue|probably because|likely because|most likely cause)\b/i;
+// ── helpers used by the request pipeline ────────────────────────────────
+const isObjectLike = (x) => x && typeof x === "object" && !Array.isArray(x);
 
-function buildUnderstandFallbackReply(searchState) {
-  const completeness = searchState
-    ? computeCaseCompleteness(searchState)
-    : { complete: false, missing: ["target role", "location", "experience level"] };
-  if (completeness.complete) {
-    return "Thanks — that gives me enough context to start looking into your situation properly. If you feel you've shared enough, tap the button below to begin the investigation, or tell me anything else you think matters.";
+// The user's own recent messages (used to verify extraction quotes).
+function recentUserTexts(messages) {
+  return messages
+    .filter((m) => m?.role === "user" && typeof m.content === "string")
+    .slice(-6)
+    .map((m) => m.content.slice(0, 1500));
+}
+
+// Targeted extraction: ONLY called when a required fact is still missing after
+// we already asked for it. Conservative by construction — the model must quote
+// the user's own words, the server verifies every quote, only fields for the
+// wanted topics are accepted, and any failure simply returns null (the normal
+// reply is never affected).
+async function runTargetedExtraction({ wantedTopics, messages, userTexts, useGroq, requestId }) {
+  try {
+    const system = buildExtractionSystemPrompt(wantedTopics);
+    const recent = messages
+      .slice(-7)
+      .map((m) => `${m?.role === "assistant" ? "ASSISTANT" : "USER"}: ${String(m?.content || "").slice(0, 600)}`)
+      .join("\n");
+    const ctx = { requestId, stage: "extraction", attempt: 1, timeoutMs: EXTRACTION_TIMEOUT_MS, maxTokens: 500, temperature: 0 };
+    const raw = useGroq
+      ? await callGroq(system, [{ role: "user", content: recent }], ctx)
+      : await callGemini(system, [{ role: "user", content: recent }], ctx);
+    const parsed = parseJSON(raw);
+    if (!isObjectLike(parsed)) return null;
+    return {
+      facts: filterExtractedFacts(parsed.facts, wantedTopics, userTexts),
+      topics: sanitizeExtractedTopics(parsed.topics, wantedTopics, userTexts),
+    };
+  } catch (err) {
+    console.error("[chat] targeted extraction failed (non-fatal)", { requestId, code: err?.code });
+    return null;
   }
-  return `Thanks — I'm still building a clear picture of your situation, and I don't want to guess at causes before I have it. One thing I still need: ${completeness.missing[0]}. Could you share that?`;
+}
+
+// One retry for the single combined save: a transient Firestore hiccup must
+// not silently cost the user a fact they already gave. Writes are idempotent.
+async function persistStateWithRetry(userId, writes, stage, requestId) {
+  try {
+    return await withTimeout(updateSearchState(userId, writes), FIRESTORE_TIMEOUT_MS, stage, requestId);
+  } catch (firstErr) {
+    console.error("[chat] state save failed, retrying once", { requestId, stage, code: firstErr?.code, message: firstErr?.message });
+    return await withTimeout(updateSearchState(userId, writes), FIRESTORE_TIMEOUT_MS, `${stage}_retry`, requestId);
+  }
+}
+
+// What may be shown while the case is still being understood. Findings,
+// signals and uncertainty stay hidden. A next step is allowed ONLY when the
+// user is tired or asked for a direct answer AND it names the user-stated
+// facts it rests on.
+function understandGate(structured, signals) {
+  const keepAction = (signals.tired || signals.direct_answer) && !!structured.action_basis && !!structured.recommended_action;
+  return {
+    ...structured,
+    insight: "",
+    signal: "",
+    uncertainty: "",
+    recommended_action: keepAction ? structured.recommended_action : "",
+  };
 }
 
 export async function POST(request) {
   // Hoisted OUTSIDE the try block on purpose: a `const`/`let` declared
-  // inside a try is NOT visible inside its own catch block (JS block
-  // scoping) — requestId was previously declared inside the try, which
-  // meant the one catch-all for truly unexpected exceptions had no request
-  // ID to log or return, directly breaking "every failure is traceable."
+  // inside a try is NOT visible inside its own catch block, and the catch-all
+  // needs the request ID so every failure is traceable.
   let requestId = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 10);
   const requestStartedAt = Date.now();
   const elapsed = () => Date.now() - requestStartedAt;
 
   try {
-    // Validate configuration before doing any real work. Previously this
-    // was only discovered lazily — deep inside callGemini/callGroq, after
-    // state had already been loaded and the prompt built — which wastes a
-    // full request cycle before telling the caller the deployment itself
-    // is misconfigured. If NEITHER provider has a key, there is no way
-    // this request can ever succeed; fail fast with a distinct, honest
-    // error instead of letting it look like a transient provider failure.
+    // If NEITHER provider has a key, no request can ever succeed — fail fast
+    // with a distinct, honest error.
     if (!process.env.GEMINI_API_KEY && !process.env.GROQ_API_KEY) {
       console.error("[chat] no provider API keys configured", { requestId });
       return NextResponse.json(
@@ -1179,8 +817,16 @@ export async function POST(request) {
         { status: 400 }
       );
     }
-    const { messages, profile = {}, userId, action } = body;
+    const { messages, profile = {}, action } = body;
     const isBeginInvestigation = action === "begin_investigation";
+
+    // Identity: a verified sign-in token wins over the browser-supplied ID.
+    // (Unchanged legacy behaviour unless LIFEPATH_REQUIRE_AUTH=true — see lib/auth.js.)
+    const auth = await authenticateRequest(request, body.userId);
+    if (auth.error) {
+      return NextResponse.json({ error: true, code: auth.code, message: auth.message, requestId }, { status: auth.status });
+    }
+    const userId = auth.userId;
 
     // Handle a direct reset request — does NOT run normal AI processing.
     if (action === "clear_search") {
@@ -1192,7 +838,7 @@ export async function POST(request) {
       }
       try {
         await withTimeout(resetSearchState(userId), FIRESTORE_TIMEOUT_MS, "reset_search_state", requestId);
-        console.log("[chat] search state reset", { requestId, userId, elapsedMs: elapsed() });
+        console.log("[chat] search state reset", { requestId, elapsedMs: elapsed() });
         return NextResponse.json({ success: true });
       } catch (err) {
         console.error("[chat] reset failed", { requestId, message: err?.message, elapsedMs: elapsed() });
@@ -1205,7 +851,7 @@ export async function POST(request) {
 
     console.log("[chat] request start", {
       requestId,
-      userId,
+      authenticated: auth.authenticated === true,
       messageCount: Array.isArray(messages) ? messages.length : null,
       totalChars: Array.isArray(messages) ? messages.reduce((sum, m) => sum + (m?.content?.length || 0), 0) : null,
     });
@@ -1236,42 +882,27 @@ export async function POST(request) {
       );
     }
 
-    // Language comes from what the USER actually wrote. On a button click the
-    // "latest message" is an internal English instruction, so detecting from
-    // it would silently switch a Malayalam/Hindi user to English. Use the
-    // user's most recent real message instead (falls back to English only if
-    // there is none).
+    // Language comes from what the USER actually wrote, never from the
+    // internal English button instruction.
     const language = detectLanguage(rawLatest || latestMsg);
-    // This is an explicit UI action, not a user-authored chat message. Add a
-    // private instruction to the model context without displaying it as chat.
     if (isBeginInvestigation) {
       messages.push({ role: "user", content: latestMsg });
     }
 
     let searchState = null;
     let searchContext = "";
-    // The phase in effect for THIS turn, frozen once at the top and used
-    // consistently both to build the prompt and to gate the response at the
-    // end — so the model is never told "understand" while the server then
-    // lets a "signal"/"diagnosis" through anyway, or vice versa. Defaults to
-    // the restrictive phase, so if saved state can't be loaded for an
-    // ordinary message the response is still fully gated.
+    // The phase in effect for THIS turn, frozen once and used both to build
+    // the prompt and to gate the response. Defaults to the restrictive phase,
+    // so if saved state can't be loaded the response is still fully gated.
     let turnPhase = "understand";
     if (userId) {
       try {
-        // ensureSearchState returns the state exactly as it was left after
-        // the PREVIOUS turn (this turn hasn't written anything yet), so its
-        // updatedAt is already the right "last seen" timestamp — no extra
-        // read needed.
         searchState = await withTimeout(ensureSearchState(userId), FIRESTORE_TIMEOUT_MS, "state_load", requestId);
         console.log("[chat] state loaded", { requestId, elapsedMs: elapsed() });
 
-        // Phase changes only after an explicit button action. Completeness
-        // makes the button available; it must never silently change the phase.
+        // Phase changes only after an explicit button action.
         if (isBeginInvestigation) {
           if (getEffectivePhase(searchState) === "investigate") {
-            // Already started (double tap, or a stale button on an old
-            // message). No AI call, no state change — just tell the user.
             return NextResponse.json({
               error: true,
               code: "ALREADY_INVESTIGATING",
@@ -1295,19 +926,15 @@ export async function POST(request) {
 
         searchContext = buildSearchContext(searchState);
 
-        // A simple, best-effort "did they come back" signal — a gap of 6+
-        // hours since the last turn. Validation signal only, never blocks
-        // the actual turn.
         const RETURN_GAP_MS = 6 * 60 * 60 * 1000;
         if (searchState.updatedAt && Date.now() - searchState.updatedAt > RETURN_GAP_MS) {
           logEvent(userId, "user_returned", { gapHours: Math.round((Date.now() - searchState.updatedAt) / 3600000) });
         }
       } catch (memErr) {
         console.error("[chat] search state load failed", { requestId, code: memErr?.code, message: memErr?.message, isBeginInvestigation, elapsedMs: elapsed() });
+        // Whatever was half-loaded must not be trusted for ledger writes.
+        searchState = null;
         if (isBeginInvestigation) {
-          // Never silently continue with default/stale state on the one
-          // action whose whole point is a state change: the user would see
-          // a normal-looking reply while the investigation never started.
           return NextResponse.json({
             error: true,
             code: "STATE_UNAVAILABLE",
@@ -1315,18 +942,11 @@ export async function POST(request) {
             requestId,
           }, { status: 503 });
         }
-        // Ordinary message: continue without saved state. turnPhase stays
-        // "understand", so the response is still fully gated below.
       }
     }
 
     console.log("[chat] search context chars:", searchContext.length);
 
-    // Two prompts: the full one for Gemini (generous context window, no
-    // evidence of a token-budget problem there), and a compact one for
-    // Groq specifically (see COMPACT_INVESTIGATION_PROMPT — a real
-    // production request exceeded Groq's token-per-minute limit using the
-    // full prompt: "Limit 8000, Requested 9281").
     const systemPrompt = buildSystem(language, searchContext, profile?.name || "");
     const compactSystemPrompt = buildCompactSystem(language, searchContext, profile?.name || "");
     console.log("[chat] prompt sizes", { requestId, fullChars: systemPrompt.length, compactChars: compactSystemPrompt.length });
@@ -1343,21 +963,12 @@ export async function POST(request) {
     } catch (firstErr) {
       lastErrorCode = firstErr.code || "SERVER_ERROR";
       console.error("[chat] first attempt failed", { requestId, code: lastErrorCode, message: firstErr?.message, elapsedMs: elapsed() });
-      // SERVER_ERROR (a bare 5xx from either provider) is just as likely to
-      // be transient as a rate limit or timeout. REQUEST_TOO_LARGE is
-      // deliberately NOT in this set — a 413 for an identical payload will
-      // fail identically on retry; that was the actual production bug
-      // (Groq 413 → blind retry → same 413 again, "Requested 9307").
+      // REQUEST_TOO_LARGE is deliberately NOT retried — an identical payload
+      // fails identically (the original Groq 413 production bug).
       if (lastErrorCode === "RATE_LIMIT" || lastErrorCode === "PROVIDER_TIMEOUT" || lastErrorCode === "SERVER_ERROR") {
         console.log("[chat] transient error, retrying once after 2s", { requestId, code: lastErrorCode });
         await sleep(2000);
         try {
-          // Retry hits Groq directly with the COMPACT prompt, NOT the full
-          // gemini-then-groq cascade again — if Gemini just failed,
-          // re-trying it immediately is unlikely to help and doubles the
-          // worst-case latency for no real benefit. A single call to a
-          // different provider, with a request already sized to fit its
-          // budget, is both faster and still genuine provider diversity.
           const retryReply = await callGroq(compactSystemPrompt, messages, { requestId, stage: "groq_retry", attempt: 2 });
           rawReply = retryReply;
           usedFallback = true;
@@ -1367,9 +978,6 @@ export async function POST(request) {
           console.error("[chat] retry also failed", { requestId, code: lastErrorCode, message: secondErr?.message, elapsedMs: elapsed() });
         }
       } else if (lastErrorCode === "REQUEST_TOO_LARGE") {
-        // Even the compact prompt plus whatever history/context this
-        // specific request carries was too large for Groq. Don't retry —
-        // log enough to diagnose without another doomed attempt.
         console.error("[chat] request too large for Groq, not retrying", { requestId, compactChars: compactSystemPrompt.length, messageCount: messages.length });
       }
     }
@@ -1400,88 +1008,168 @@ export async function POST(request) {
     }
 
     let structured = sanitizeStructured(parsed);
+    const signals = structured.signals;
+
+    // ════════════════════════════════════════════════════════════════════
+    // CONVERSATION MEMORY PIPELINE. Everything here is computed in memory;
+    // nothing is saved until the single combined write further down.
+    // ════════════════════════════════════════════════════════════════════
+    const nowTs = Date.now();
+    const stateKnown = !!(userId && searchState);
+    const ledgerBefore = stateKnown && isObjectLike(searchState.ledger) ? searchState.ledger : {};
+    const touched = new Set();
+    const userTexts = recentUserTexts(messages);
+    const attachedCv = !isBeginInvestigation && /\[CV attached:/.test(rawLatest);
+
+    // 1. Facts the model reported (per-key, so one channel never wipes the other).
+    const factUpdates = extractNonEmptyUpdates(structured.facts_update);
+    const factSources = {};
+    for (const k of Object.keys(factUpdates)) factSources[k.split(".")[0]] = "model_extracted";
+    // An attached CV is detected deterministically — it doesn't depend on the model.
+    if (attachedCv && !(stateKnown && searchState.cvProvided === true)) {
+      factUpdates.cvProvided = true;
+      factSources.cvProvided = "attachment";
+    }
+
+    // 2. Statuses the user settled this turn, and corrections.
+    let ledger = applyTopicUpdates(ledgerBefore, structured.topics, nowTs, touched);
+    ledger = markCorrection(ledger, signals.correction_of, nowTs, touched);
+    let projected = applyUpdatesToState(stateKnown ? searchState : {}, factUpdates);
+    ledger = reconcileDerived(ledger, projected, nowTs, touched);
+
+    // 3. Targeted extraction — only if a required fact is still missing after
+    //    we asked for it (or the user said they already answered), and the
+    //    request isn't already slow. Never on ordinary turns.
+    if (stateKnown && !isBeginInvestigation && elapsed() < EXTRACTION_MAX_ELAPSED_MS) {
+      const wanted = topicsNeedingExtraction(projected, ledger);
+      if (wanted.length > 0) {
+        const extraction = await runTargetedExtraction({ wantedTopics: wanted, messages, userTexts, useGroq: usedFallback, requestId });
+        ledger = noteExtractionAttempts(ledger, wanted, nowTs, touched);
+        if (extraction) {
+          let filled = 0;
+          for (const [field, value] of Object.entries(extraction.facts)) {
+            // Fill-only: never overwrite anything already known or already
+            // reported this turn.
+            if (projected[field] == null || projected[field] === "") {
+              factUpdates[field] = value;
+              factSources[field] = "targeted_extraction";
+              filled++;
+            }
+          }
+          ledger = applyTopicUpdates(ledger, extraction.topics, nowTs, touched);
+          projected = applyUpdatesToState(searchState, factUpdates);
+          ledger = reconcileDerived(ledger, projected, nowTs, touched);
+          console.log("[chat] targeted extraction done", { requestId, wanted, filled, statuses: extraction.topics.length });
+        }
+      }
+    }
+
+    // 4. Question gate — only the QUESTION can be dropped, never the reply.
+    const decision = evaluateQuestion(ledger, structured.question, signals);
+    if (structured.question && !decision.allow) {
+      console.log("[chat] question not shown", { requestId, topic: structured.question.topic || null, reason: decision.reason });
+    }
+    if (structured.question && !structured.question.topic) {
+      console.log("[chat] question without a topic id (cannot be gated)", { requestId });
+    }
+    if (decision.allow && structured.question?.topic) {
+      ledger = recordAsked(ledger, structured.question.topic, nowTs, touched);
+    }
+
+    // 5. Repair unsupported statements sentence by sentence (never wipe a reply).
+    const repairCtx = {
+      phase: turnPhase,
+      hasCv: projected.cvProvided === true,
+      hasJds: projected.jobDescriptionsProvided === true,
+    };
+    const fixedReply = repairText(structured.reply, repairCtx);
+    const fixedInsight = repairText(structured.insight, repairCtx);
+    const fixedAction = repairText(structured.recommended_action, repairCtx);
+    const fixedTip = repairText(structured.tip, repairCtx);
+    const removedTotal = fixedReply.removed + fixedInsight.removed + fixedAction.removed + fixedTip.removed;
+    if (removedTotal > 0) {
+      console.warn("[chat] unsupported statements removed", { requestId, count: removedTotal, phase: turnPhase });
+    }
+
+    let replyBody = fixedReply.text;
+    if (!replyBody) {
+      // Nothing usable left: say what we actually know instead of going silent.
+      replyBody = [signals.emotion !== "none" ? fallbackAcknowledgement() : "", buildKnownSummary(projected)].filter(Boolean).join(" ");
+    }
+    if (removedTotal > 0 || (signals.market_claim && !repairCtx.hasJds)) {
+      const note = groundingNote(language);
+      replyBody = replyBody ? `${replyBody}\n\n${note}` : note;
+    }
+    const finalReply = composeReply(replyBody, structured.question, decision) || "Thanks for sharing that.";
+    const actionFlag = fixedAction.text && !structured.action_basis ? "general" : "";
+
+    structured = {
+      ...structured,
+      reply: finalReply,
+      insight: fixedInsight.text,
+      recommended_action: fixedAction.text,
+      tip: fixedTip.text,
+      question: undefined,
+      topics: undefined,
+      signals: undefined,
+    };
+
+    // 6. What will be saved (one combined write, changed fields only).
+    const writes = { ...factUpdates };
+    if (stateKnown) {
+      // Only when saved state really loaded: otherwise we could overwrite a
+      // ledger we never saw.
+      for (const t of touched) writes[`ledger.${t}`] = ledger[t];
+    }
+    for (const [field, source] of Object.entries(factSources)) {
+      writes[`provenance.${field}`] = { source, at: nowTs };
+    }
 
     let verifiedStats = null;
+    let memorySaved = true;
     // Set to true only once the evidence checks for this turn have actually
-    // run to completion (feedback mode verified, unearned diagnosis cleared).
-    // If anything before that point throws — a Firestore timeout while
-    // saving facts, say — the INVESTIGATE response is forced down to its safe
-    // form below instead of leaking the model's unchecked diagnosis.
+    // run to completion. If anything before that point throws, the
+    // INVESTIGATE response is forced to its safe form below.
     let evidenceGateCompleted = false;
     if (userId) {
       try {
-        const updates = extractNonEmptyUpdates(structured.facts_update);
-        if (Object.keys(updates).length > 0) {
-          searchState = await withTimeout(updateSearchState(userId, updates), FIRESTORE_TIMEOUT_MS, "facts_persist", requestId);
-          logEvent(userId, "evidence_provided", { fields: Object.keys(updates) });
+        if (Object.keys(writes).length > 0) {
+          try {
+            searchState = await persistStateWithRetry(userId, writes, "facts_persist", requestId);
+          } catch (persistErr) {
+            memorySaved = false;
+            console.error("[chat] facts could not be saved after retry", { requestId, code: persistErr?.code, message: persistErr?.message });
+            throw persistErr;
+          }
+          const factFields = Object.keys(factSources);
+          if (factFields.length > 0) logEvent(userId, "evidence_provided", { fields: factFields });
         }
 
         verifiedStats = computeVerifiedStats(searchState);
-        // Show the reported count as a fact, not a Low/Medium/High proxy for
-        // evidence quality. Application volume alone says nothing about cause.
-        if (searchState?.applicationsTotal != null) {
-          verifiedStats = { ...(verifiedStats || {}), applicationsReported: searchState.applicationsTotal };
-        }
 
-        // Persist hypothesis tracking regardless of feedback_mode, so the
-        // reasoning state actually accumulates across turns (this is the
-        // "intelligence layer" — not just chat text).
         if (Array.isArray(structured.hypotheses) && structured.hypotheses.length > 0) {
           searchState = await withTimeout(updateSearchState(userId, { hypotheses: structured.hypotheses }), FIRESTORE_TIMEOUT_MS, "hypotheses_persist", requestId);
         }
 
-        // Confidence shown to the user must track a SPECIFIC hypothesis,
-        // never application volume — computed fresh from whatever is
-        // actually persisted right now, not cached from an earlier turn.
-        // During UNDERSTAND, hypotheses may exist internally (to pick the
-        // next question) but must never be exposed — hard-hide the badge
-        // regardless of what the model claims.
         structured = {
           ...structured,
           leadingHypothesis: turnPhase === "understand" ? null : leadingHypothesis(searchState.hypotheses),
         };
 
-        // HARD UNDERSTAND-PHASE GATE: the UI renders `insight` (as "signal
-        // found") and `recommended_action`/`ready_to_investigate_deeper`
-        // independently of feedback_mode, so gating feedback_mode alone is
-        // NOT sufficient to hide findings/interpretations during UNDERSTAND
-        // — strip the content itself. `reply`, `next_question` and `tip`
-        // are untouched here (the final gate below checks `reply`/`tip`
-        // for speculation): that's where the actual question and factual
-        // summary live, which IS allowed during UNDERSTAND.
+        // HARD UNDERSTAND-PHASE GATE.
         if (turnPhase === "understand") {
-          structured = {
-            ...structured,
-            insight: "",
-            signal: "",
-            recommended_action: "",
-            uncertainty: "",
-            // Readiness is assigned deterministically below from persisted facts,
-            // never trusted from the model.
-            ready_to_investigate_deeper: false,
-          };
-        }
-        if (turnPhase === "understand") {
+          structured = { ...understandGate(structured, signals), ready_to_investigate_deeper: false };
           const completeness = computeCaseCompleteness(searchState);
-          structured = {
-            ...structured,
-            ready_to_investigate_deeper: completeness.complete,
-          };
+          structured = { ...structured, ready_to_investigate_deeper: completeness.complete };
         } else {
           structured = { ...structured, ready_to_investigate_deeper: false };
         }
 
-        // Server-side gate — never trust the model's own feedback_mode or
-        // diagnosis claim blindly. This can only ever downgrade, never upgrade.
-        // While turnPhase is "understand", feedback_mode is hard-forced to
-        // "none" no matter what the model claims or what the evidence gate
-        // would otherwise allow — the case isn't understood yet, so nothing
-        // gets presented as a finding, signal, or diagnosis.
         const evidenceFeedbackMode = computeFeedbackMode(structured, searchState);
         const finalFeedbackMode = turnPhase === "understand" ? "none" : evidenceFeedbackMode;
         if (finalFeedbackMode !== structured.feedback_mode) {
           console.log("[chat] feedback_mode downgraded", {
-            userId, claimed: structured.feedback_mode, final: finalFeedbackMode,
+            requestId, claimed: structured.feedback_mode, final: finalFeedbackMode,
             reason: turnPhase === "understand" ? "still in UNDERSTAND phase" : "insufficient server-verified evidence",
           });
         }
@@ -1490,9 +1178,8 @@ export async function POST(request) {
           logEvent(userId, "useful_finding_produced", { insight: (structured.insight || structured.signal || "").slice(0, 160) });
         }
 
-        // Never let an unearned diagnosis object reach the client. This is
-        // cleared BEFORE any further write below, so a persistence failure
-        // after this point can't resurrect it.
+        // Never let an unearned diagnosis reach the client. Cleared BEFORE any
+        // further write, so a later persistence failure can't resurrect it.
         const diagnosisEarned = finalFeedbackMode === "diagnosis" && !!structured.diagnosis?.bottleneck;
         if (!diagnosisEarned) {
           structured = { ...structured, diagnosis: EMPTY_DIAGNOSIS() };
@@ -1500,17 +1187,10 @@ export async function POST(request) {
         evidenceGateCompleted = true;
 
         if (diagnosisEarned) {
-          // Only an earned diagnosis is persisted as "the" diagnosis — this is
-          // what future turns see as "previously earned diagnosis" and are
-          // explicitly told they may revise or retract.
           searchState = await withTimeout(updateSearchState(userId, { diagnosis: structured.diagnosis }), FIRESTORE_TIMEOUT_MS, "diagnosis_persist", requestId);
           logEvent(userId, "investigation_completed", { bottleneck: structured.diagnosis.bottleneck });
         }
 
-        // Bookkeeping only — never block the response on these. Losing one
-        // fact-log/active-task entry on a rare Firestore hiccup is low
-        // stakes; making the user wait on it (or fail their whole turn
-        // because of it) is not an acceptable trade.
         if (structured.insight) {
           fireAndForget(addSearchFact(userId, structured.insight), "fact_log", requestId);
         }
@@ -1522,8 +1202,7 @@ export async function POST(request) {
         console.error("[chat] search state update failed (non-fatal)", { requestId, code: err?.code, message: err?.message, evidenceGateCompleted, elapsedMs: elapsed() });
       }
     } else {
-      // No userId at all means no persisted evidence to verify against —
-      // never allow signal/diagnosis feedback modes without a verifiable state.
+      // No userId means no persisted evidence to verify against.
       structured = {
         ...structured,
         feedback_mode: "none",
@@ -1532,31 +1211,11 @@ export async function POST(request) {
       };
     }
 
-    // Final fail-closed UI gate, outside persistence try/catch: even if
-    // Firestore persistence failed, the model cannot expose findings or a
-    // readiness button during UNDERSTAND. Readiness comes only from saved facts.
+    // Final fail-closed gate, outside the persistence try/catch.
     if (turnPhase === "understand") {
       const completeness = userId && searchState ? computeCaseCompleteness(searchState) : { complete: false };
-
-      // Nothing the model wrote in `hypotheses` is exposed to the user
-      // during UNDERSTAND (the UI never renders it, but the API response
-      // shouldn't carry it either).
-      let reply = structured.reply;
-      let tip = structured.tip;
-      if (SPECULATIVE_UNDERSTAND_PATTERN.test(`${reply}\n${tip}`)) {
-        console.warn("[chat] speculative reply blocked during UNDERSTAND", { requestId });
-        reply = buildUnderstandFallbackReply(userId ? searchState : null);
-        tip = "";
-      }
-
       structured = {
-        ...structured,
-        reply,
-        tip,
-        insight: "",
-        signal: "",
-        recommended_action: "",
-        uncertainty: "",
+        ...understandGate(structured, signals),
         hypotheses: [],
         feedback_mode: "none",
         diagnosis: EMPTY_DIAGNOSIS(),
@@ -1564,15 +1223,8 @@ export async function POST(request) {
         ready_to_investigate_deeper: completeness.complete === true,
       };
     } else {
-      // The button is only a phase transition, never a shortcut to a diagnosis.
       structured = { ...structured, ready_to_investigate_deeper: false };
-
       if (!evidenceGateCompleted) {
-        // INVESTIGATE, but the evidence checks never finished (a state save
-        // failed or timed out first). The model's own diagnosis and
-        // feedback_mode are unverified claims — fail closed: no diagnosis,
-        // no confidence badge, and at most a plain signal if there's
-        // actually an insight to show.
         console.warn("[chat] INVESTIGATE evidence gate did not complete — failing closed", { requestId });
         const hasFinding = !!(structured.insight || structured.signal);
         structured = {
@@ -1584,20 +1236,26 @@ export async function POST(request) {
       }
     }
 
-    console.log("[chat] request complete", { requestId, elapsedMs: elapsed(), engine: usedFallback ? "groq" : "gemini" });
+    // Numbers are shown only when they help: a real portal-vs-direct
+    // comparison, during investigation, for a user who isn't hurting/tired.
+    const showStats = turnPhase !== "understand" && !!verifiedStats &&
+      verifiedStats.portalRate != null && verifiedStats.directRate != null &&
+      signals.emotion === "none" && !signals.tired;
+
+    // The final action flag must still match what is actually shown.
+    const shownActionFlag = structured.recommended_action ? actionFlag : "";
+
+    console.log("[chat] request complete", { requestId, elapsedMs: elapsed(), engine: usedFallback ? "groq" : "gemini", phase: turnPhase, memorySaved });
     return NextResponse.json({
-      structured,
-      verified_stats: verifiedStats,
+      structured: { ...structured, phase: turnPhase, show_stats: showStats, action_flag: shownActionFlag },
+      verified_stats: showStats ? verifiedStats : null,
+      memory_saved: memorySaved,
       language,
       engine: usedFallback ? "groq" : "gemini",
       requestId,
     });
   } catch (error) {
-    // The one true catch-all for anything not already handled above —
-    // requestId is now declared OUTSIDE this try (see top of function), so
-    // it's guaranteed to be available here even for a totally unexpected
-    // exception. Never logs message content or secrets — only the error's
-    // own message/stack and the request metadata.
+    // The one true catch-all for anything not already handled above.
     console.error("[chat] unhandled error", {
       requestId, code: error?.code, message: error?.message, elapsedMs: elapsed(),
       stack: error instanceof Error ? error.stack?.slice(0, 1000) : "no stack",
