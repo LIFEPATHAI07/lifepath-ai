@@ -497,7 +497,8 @@ const sanitizeStructured = (parsed) => {
   };
   merged.facts_update.channels = { ...SAFE_DEFAULTS.facts_update.channels, ...(parsed.facts_update?.channels || {}) };
   merged.facts_update.channelResponses = { ...SAFE_DEFAULTS.facts_update.channelResponses, ...(parsed.facts_update?.channelResponses || {}) };
-// Every field the UI renders as text must actually be a string — a model
+
+  // Every field the UI renders as text must actually be a string — a model
   // that returns an object/number/null here would otherwise crash the card
   // (and break the server-side text checks below).
   for (const key of ["reply", "insight", "uncertainty", "recommended_action", "action_basis", "next_question", "tip"]) {
