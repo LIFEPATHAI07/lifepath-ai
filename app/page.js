@@ -3,17 +3,38 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { db } from "../lib/firebase";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { getUserId } from "../lib/user";
+import { getAuth, signInAnonymously } from "firebase/auth";
 
 const S = {
   get: (k, fb = null) => { try { const d = localStorage.getItem(k); return d ? JSON.parse(d) : fb; } catch { return fb; } },
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
 
+// Identity. If Firebase anonymous sign-in is available, the browser sends a
+// sign-in token the server can verify; otherwise it silently falls back to the
+// old local ID (the server accepts that unless LIFEPATH_REQUIRE_AUTH=true).
+const currentUserId = () => {
+  try { return getAuth().currentUser?.uid || getUserId(); } catch { return getUserId(); }
+};
+let authPromise = null;
+const getAuthToken = async () => {
+  try {
+    const auth = getAuth();
+    if (!auth.currentUser) {
+      if (!authPromise) authPromise = signInAnonymously(auth).catch(() => null).finally(() => { authPromise = null; });
+      await authPromise;
+    }
+    return auth.currentUser ? await auth.currentUser.getIdToken() : null;
+  } catch {
+    return null;
+  }
+};
+
 const saveFeedback = async ({ feedbackType = "signal", rating, reason = "", correction = "", snapshot = null }) => {
   try {
     const colRef = collection(db, "feedback");
     const docData = {
-      userId: getUserId(),
+      userId: currentUserId(),
       pillar: "diagnosis",
       feedbackType,
       rating,
@@ -141,7 +162,7 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbE
   const feedbackMode = data.feedback_mode || (data.analysis_ready === true ? "diagnosis" : "none");
   const isDiagnosis = feedbackMode === "diagnosis" && !!diagnosis?.bottleneck;
   const isSignal = feedbackMode === "signal" && !isDiagnosis;
-  const hasVerifiedNumbers = data.verified_stats && (data.verified_stats.portalRate != null || data.verified_stats.directRate != null || data.verified_stats.applicationsReported != null);
+  const hasVerifiedNumbers = data.show_stats === true && data.verified_stats && (data.verified_stats.portalRate != null || data.verified_stats.directRate != null);
 
   const submitDiagnosisPositive = () => {
     onFeedback?.({
@@ -182,22 +203,9 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbE
         )}
 
         {insight && (
-          <div style={{ padding: "14px 16px", background: "rgba(99,102,241,.06)", borderTop: isDiagnosis ? "none" : "1px solid rgba(255,255,255,.05)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 7 }}>
-              <span style={{ color: "#818cf8", fontSize: 9, fontWeight: 700, letterSpacing: 2 }}>
-                {isDiagnosis ? "WHAT WE FOUND" : isSignal ? "🔎 JOB SEARCH SIGNAL" : "🔍 SIGNAL FOUND"}
-              </span>
-              {isSignal && data.leadingHypothesis?.confidence && (
-                <span title={`Confidence in the specific idea being discussed ("${data.leadingHypothesis.label}") — not proof, and not based on how much data we have`} style={{
-                  fontSize: 9, fontWeight: 800, letterSpacing: 1, padding: "3px 8px", borderRadius: 100,
-                  color: data.leadingHypothesis.confidence === "low" ? "#f59e0b" : data.leadingHypothesis.confidence === "medium" ? "#818cf8" : "#10b981",
-                  background: data.leadingHypothesis.confidence === "low" ? "rgba(245,158,11,.1)" : data.leadingHypothesis.confidence === "medium" ? "rgba(99,102,241,.1)" : "rgba(16,185,129,.1)",
-                }}>
-                  HYPOTHESIS CONFIDENCE: {data.leadingHypothesis.confidence?.toUpperCase()}
-                </span>
-              )}
-            </div>
-            <div style={{ color: "#c7d2fe", fontSize: 13, lineHeight: 1.6 }}>{insight}</div>
+          <div style={{ padding: "12px 16px", borderTop: isDiagnosis ? "none" : "1px solid rgba(255,255,255,.05)", background: isDiagnosis ? "rgba(99,102,241,.06)" : "transparent" }}>
+            {isDiagnosis && <div style={{ color: "#818cf8", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 7 }}>WHAT WE FOUND</div>}
+            <div style={{ color: isDiagnosis ? "#c7d2fe" : "#cbd5e1", fontSize: 13.5, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{insight}</div>
           </div>
         )}
 
@@ -228,15 +236,15 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbE
         )}
 
         {uncertainty && (
-          <div style={{ padding: "12px 16px", borderTop: "1px solid rgba(255,255,255,.04)" }}>
-            <div style={{ color: "#94a3b8", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 5 }}>{isDiagnosis ? "WHAT WE DON'T KNOW YET" : "⚠️ UNCERTAINTY"}</div>
-            <div style={{ color: "#64748b", fontSize: 12, lineHeight: 1.6 }}>{uncertainty}</div>
+          <div style={{ padding: "6px 16px 12px" }}>
+            {isDiagnosis && <div style={{ color: "#94a3b8", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 5 }}>WHAT WE DON'T KNOW YET</div>}
+            <div style={{ color: "#64748b", fontSize: 12.5, lineHeight: 1.65, fontStyle: isDiagnosis ? "normal" : "italic", whiteSpace: "pre-wrap" }}>{uncertainty}</div>
           </div>
         )}
 
         {hasVerifiedNumbers && (
-          <div style={{ padding: "12px 16px", background: "rgba(16,185,129,.04)", borderTop: "1px solid rgba(255,255,255,.04)" }}>
-            <div style={{ color: "#10b981", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 6 }}>📊 FROM THE NUMBERS YOU GAVE</div>
+          <div style={{ padding: "10px 16px", background: "rgba(16,185,129,.04)", borderTop: "1px solid rgba(255,255,255,.04)" }}>
+            <div style={{ color: "#10b981", fontSize: 10, fontWeight: 700, marginBottom: 5 }}>Portal vs direct, from your numbers</div>
             {data.verified_stats.portalRate != null && (
               <div style={{ color: "#94a3b8", fontSize: 12, marginBottom: 3 }}>
                 Portal: {data.verified_stats.portalRate}% response ({data.verified_stats.portalResponses}/{data.verified_stats.portalApplications})
@@ -247,18 +255,16 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbE
                 Direct: {data.verified_stats.directRate}% response ({data.verified_stats.directResponses}/{data.verified_stats.directApplications})
               </div>
             )}
-            {data.verified_stats.applicationsReported != null && (
-              <div title="This is the number of applications reported, not diagnostic confidence." style={{ color: "#475569", fontSize: 11, marginTop: 6, fontStyle: "italic" }}>
-                Applications reported: {data.verified_stats.applicationsReported} (not evidence strength)
-              </div>
-            )}
           </div>
         )}
 
         {recommended_action && (
-          <div style={{ padding: "14px 16px", background: "rgba(245,158,11,.05)", borderTop: "1px solid rgba(255,255,255,.04)" }}>
-            <div style={{ color: "#f59e0b", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 6 }}>{isDiagnosis ? "WHAT WE'D INVESTIGATE NEXT" : "🎯 SMALLEST NEXT STEP"}</div>
-            <div style={{ color: "#fbbf24", fontSize: 13, lineHeight: 1.6, fontWeight: 600 }}>{recommended_action}</div>
+          <div style={{ padding: "12px 16px", background: "rgba(245,158,11,.05)", borderTop: "1px solid rgba(255,255,255,.04)" }}>
+            <div style={{ color: "#f59e0b", fontSize: 10, fontWeight: 700, marginBottom: 5 }}>{isDiagnosis ? "WHAT WE'D INVESTIGATE NEXT" : "A small next step"}</div>
+            <div style={{ color: "#fbbf24", fontSize: 13.5, lineHeight: 1.65, fontWeight: 600, whiteSpace: "pre-wrap" }}>{recommended_action}</div>
+            {data.action_flag === "general" && (
+              <div style={{ color: "#94a3b8", fontSize: 11, marginTop: 6, fontStyle: "italic" }}>This is a general suggestion — it isn't tied to your specific evidence yet.</div>
+            )}
           </div>
         )}
 
@@ -274,7 +280,13 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbE
         {/* The button only ever appears on the LATEST assistant card, so older
             cards can't be used to start a second investigation. It means "I have
             enough context to begin" — not "a diagnosis is ready". */}
-        {ready_to_investigate_deeper && isLatest && (
+        {data.memory_saved === false && (
+          <div style={{ padding: "8px 16px", color: "#94a3b8", fontSize: 11, fontStyle: "italic", borderTop: "1px solid rgba(255,255,255,.04)" }}>
+            I couldn't save that last update, so I may need you to repeat it.
+          </div>
+        )}
+
+        {ready_to_investigate_deeper && isLatest && data.phase !== "investigate" && (
           <div style={{ padding: "12px 16px", borderTop: "1px solid rgba(255,255,255,.04)" }}>
             <div style={{ color: "#94a3b8", fontSize: 12, lineHeight: 1.6, marginBottom: 10 }}>
               I now have the basics: your target role, location, experience and what has happened with your applications so far. Starting the investigation lets me test possible explanations and ask for specific evidence. It doesn't mean I have an answer yet.
@@ -580,10 +592,11 @@ export default function LifePath() {
     const clientTimeout = setTimeout(() => controller.abort(), 60000);
 
     try {
+      const token = await getAuthToken();
       const res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: apiMessages, userId: getUserId(), ...(requestAction ? { action: requestAction } : {}) }),
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ messages: apiMessages, userId: currentUserId(), ...(requestAction ? { action: requestAction } : {}) }),
         signal: controller.signal,
       });
       // A crashed or timed-out server can return an HTML page, not JSON.
@@ -603,7 +616,7 @@ export default function LifePath() {
 
       const aiMsg = {
         role: "assistant",
-        structured: { ...data.structured, verified_stats: data.verified_stats },
+        structured: { ...data.structured, verified_stats: data.verified_stats, memory_saved: data.memory_saved !== false },
       };
       setMessages(m => [...m, aiMsg]);
     } catch (err) {
@@ -693,10 +706,11 @@ export default function LifePath() {
   const clearChat = async () => {
     setClearing(true);
     try {
+      const token = await getAuthToken();
       const res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "clear_search", userId: getUserId() }),
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ action: "clear_search", userId: currentUserId() }),
       });
       const data = await readJsonSafe(res);
       if (!data) {
