@@ -32,6 +32,11 @@ import {
   groundingNote,
   buildKnownSummary,
   fallbackAcknowledgement,
+  isRepeat,
+  dedupeHypotheses,
+  isGrounded,
+  sanitizeComparison,
+  limitQuestions,
 } from "../../../lib/caseLedger";
 import { buildSystem, buildCompactSystem, buildExtractionSystemPrompt } from "../../../lib/prompts";
 import { authenticateRequest } from "../../../lib/auth";
@@ -379,6 +384,7 @@ const SAFE_DEFAULTS = {
   action_basis: "",
   next_question: "",
   question: null,
+  comparison: [],
   topics: [],
   signals: { emotion: "none", tired: false, direct_answer: false, correction_of: "", market_claim: false },
   tip: "",
@@ -510,8 +516,10 @@ const sanitizeStructured = (parsed) => {
   merged.signals = sanitizeSignals(parsed.signals);
 
   merged.hypotheses = Array.isArray(parsed.hypotheses)
-    ? parsed.hypotheses.map(sanitizeHypothesis).filter(Boolean).map(enforceHypothesisEvidenceLadder).slice(0, MAX_HYPOTHESES)
+    ? dedupeHypotheses(parsed.hypotheses.map(sanitizeHypothesis).filter(Boolean)).map(enforceHypothesisEvidenceLadder).slice(0, MAX_HYPOTHESES)
     : [];
+  // Raw rows only; the route verifies every quote against the user's own text.
+  merged.comparison = Array.isArray(parsed.comparison) ? parsed.comparison.slice(0, 20) : [];
   merged.diagnosis = sanitizeDiagnosis(parsed.diagnosis);
   merged.signal = typeof parsed.signal === "string" ? parsed.signal.slice(0, 300) : "";
   merged.feedback_mode = VALID_FEEDBACK_MODE.includes(parsed.feedback_mode) ? parsed.feedback_mode : "none";
@@ -729,11 +737,49 @@ const isObjectLike = (x) => x && typeof x === "object" && !Array.isArray(x);
 
 // The user's own recent messages (used to verify extraction quotes).
 function recentUserTexts(messages) {
-  return messages
+  const last = messages
     .filter((m) => m?.role === "user" && typeof m.content === "string")
-    .slice(-6)
-    .map((m) => m.content.slice(0, 1500));
+    .slice(-6);
+  // The latest message may carry a whole CV or pasted job postings, so keep
+  // it (almost) intact for quote verification; older ones are shortened.
+  return last.map((m, i) => m.content.slice(0, i === last.length - 1 ? 12000 : 1500));
 }
+
+// ── request validation and a best-effort rate limit ─────────────────────
+const MAX_MESSAGES = 60;
+const MAX_CONTENT_CHARS = 12000;
+
+// Returns a clean message array, or "too_many" / "too_long" / null.
+function normalizeMessages(raw) {
+  if (!Array.isArray(raw)) return null;
+  if (raw.length > MAX_MESSAGES) return "too_many";
+  const out = [];
+  for (const m of raw) {
+    if (!m || (m.role !== "user" && m.role !== "assistant") || typeof m.content !== "string") continue;
+    if (m.content.length > MAX_CONTENT_CHARS) return "too_long";
+    if (m.content.trim()) out.push({ role: m.role, content: m.content });
+  }
+  return out;
+}
+
+// In-memory sliding window per user/IP. Serverless instances don't share
+// memory, so this is a speed bump against runaway loops and casual abuse, not
+// a hard guarantee; real protection needs a shared store (e.g. Upstash/Vercel KV).
+const rateBuckets = new Map();
+function isRateLimited(key) {
+  const limit = Number(process.env.LIFEPATH_RATE_LIMIT) > 0 ? Number(process.env.LIFEPATH_RATE_LIMIT) : 20;
+  const now = Date.now();
+  const recent = (rateBuckets.get(key) || []).filter((t) => now - t < 60000);
+  if (recent.length >= limit) { rateBuckets.set(key, recent); return true; }
+  recent.push(now);
+  rateBuckets.set(key, recent);
+  if (rateBuckets.size > 5000) {
+    for (const [k, v] of rateBuckets) if (!v.some((t) => now - t < 60000)) rateBuckets.delete(k);
+  }
+  return false;
+}
+
+const safeName = (name) => String(name || "").replace(/[^\p{L}\p{N} .'-]/gu, "").slice(0, 40);
 
 // Targeted extraction: ONLY called when a required fact is still missing after
 // we already asked for it. Conservative by construction — the model must quote
@@ -785,6 +831,7 @@ function understandGate(structured, signals) {
     insight: "",
     signal: "",
     uncertainty: "",
+    comparison: [],
     recommended_action: keepAction ? structured.recommended_action : "",
   };
 }
@@ -818,7 +865,8 @@ export async function POST(request) {
         { status: 400 }
       );
     }
-    const { messages, profile = {}, action } = body;
+    const { profile = {}, action } = body;
+    let messages = body.messages;
     const isBeginInvestigation = action === "begin_investigation";
 
     // Identity: a verified sign-in token wins over the browser-supplied ID.
@@ -828,6 +876,15 @@ export async function POST(request) {
       return NextResponse.json({ error: true, code: auth.code, message: auth.message, requestId }, { status: auth.status });
     }
     const userId = auth.userId;
+
+    // Best-effort rate limit (see isRateLimited).
+    const clientIp = (request?.headers?.get?.("x-forwarded-for") || "").split(",")[0].trim();
+    if (isRateLimited(userId || clientIp || "anonymous")) {
+      return NextResponse.json(
+        { error: true, code: "RATE_LIMIT", message: "You're sending messages very quickly. Please wait a moment and try again.", requestId },
+        { status: 429 }
+      );
+    }
 
     // Handle a direct reset request — does NOT run normal AI processing.
     if (action === "clear_search") {
@@ -850,19 +907,27 @@ export async function POST(request) {
       }
     }
 
-    console.log("[chat] request start", {
-      requestId,
-      authenticated: auth.authenticated === true,
-      messageCount: Array.isArray(messages) ? messages.length : null,
-      totalChars: Array.isArray(messages) ? messages.reduce((sum, m) => sum + (m?.content?.length || 0), 0) : null,
-    });
-
-    if (!Array.isArray(messages) || !messages.length) {
+    const normalizedMessages = normalizeMessages(messages);
+    if (normalizedMessages === "too_many" || normalizedMessages === "too_long") {
+      return NextResponse.json(
+        { error: true, code: "INVALID_REQUEST", message: "That message or conversation is too long to process. Please shorten it or start a new chat.", requestId },
+        { status: 413 }
+      );
+    }
+    if (!normalizedMessages || !normalizedMessages.length) {
       return NextResponse.json(
         { error: true, code: "INVALID_REQUEST", message: "Messages required.", requestId },
         { status: 400 }
       );
     }
+    messages = normalizedMessages;
+
+    console.log("[chat] request start", {
+      requestId,
+      authenticated: auth.authenticated === true,
+      messageCount: messages.length,
+      totalChars: messages.reduce((sum, m) => sum + m.content.length, 0),
+    });
 
     // Starting the investigation is a phase change on SAVED state, so it
     // can't be validated (or honored) without a user to load that state for.
@@ -948,8 +1013,8 @@ export async function POST(request) {
 
     console.log("[chat] search context chars:", searchContext.length);
 
-    const systemPrompt = buildSystem(language, searchContext, profile?.name || "");
-    const compactSystemPrompt = buildCompactSystem(language, searchContext, profile?.name || "");
+    const systemPrompt = buildSystem(language, searchContext, safeName(profile?.name));
+    const compactSystemPrompt = buildCompactSystem(language, searchContext, safeName(profile?.name));
     console.log("[chat] prompt sizes", { requestId, fullChars: systemPrompt.length, compactChars: compactSystemPrompt.length });
 
     let rawReply;
@@ -1082,33 +1147,63 @@ export async function POST(request) {
       phase: turnPhase,
       hasCv: projected.cvProvided === true,
       hasJds: projected.jobDescriptionsProvided === true,
+      // Everything the user actually said — a tool or skill named by the AI
+      // but absent from this text is treated as unverified.
+      knownText: [...userTexts, projected.roleTarget, projected.experienceLevel, projected.problemStatement].filter(Boolean).join(" "),
     };
     const fixedReply = repairText(structured.reply, repairCtx);
     const fixedInsight = repairText(structured.insight, repairCtx);
     const fixedAction = repairText(structured.recommended_action, repairCtx);
     const fixedTip = repairText(structured.tip, repairCtx);
-    const removedTotal = fixedReply.removed + fixedInsight.removed + fixedAction.removed + fixedTip.removed;
+    const fixedUncertainty = repairText(structured.uncertainty, repairCtx);
+    const removedTotal = fixedReply.removed + fixedInsight.removed + fixedAction.removed + fixedTip.removed + fixedUncertainty.removed;
+    const removedReasons = [...fixedReply.reasons, ...fixedInsight.reasons, ...fixedAction.reasons, ...fixedTip.reasons, ...fixedUncertainty.reasons];
     if (removedTotal > 0) {
-      console.warn("[chat] unsupported statements removed", { requestId, count: removedTotal, phase: turnPhase });
+      console.warn("[chat] unsupported statements removed", { requestId, count: removedTotal, reasons: removedReasons, phase: turnPhase });
     }
 
-    let replyBody = fixedReply.text;
+    // Never repeat advice or an insight the user has already been given.
+    const alreadySaid = stateKnown
+      ? [searchState.activeTask?.title, ...(Array.isArray(searchState.facts) ? searchState.facts.slice(-6) : [])]
+      : [];
+    let insightText = fixedInsight.text;
+    let actionText = fixedAction.text;
+    if (insightText && isRepeat(insightText, alreadySaid)) { console.log("[chat] repeated insight dropped", { requestId }); insightText = ""; }
+    if (actionText && isRepeat(actionText, alreadySaid)) { console.log("[chat] repeated next step dropped", { requestId }); actionText = ""; }
+
+    // One question per reply. If the model also supplied the gated `question`
+    // field, every question sentence in the body is dropped (otherwise a
+    // body question could slip past the repeat-question gate); if it didn't,
+    // only the first body question is kept. Quoted questions are untouched.
+    const questionCap = limitQuestions(fixedReply.text, { dropAll: !!structured.question });
+    if (questionCap.dropped > 0) {
+      console.log("[chat] extra questions in reply body dropped", { requestId, count: questionCap.dropped, hadGatedQuestion: !!structured.question });
+    }
+
+    let replyBody = questionCap.text;
     if (!replyBody) {
       // Nothing usable left: say what we actually know instead of going silent.
       replyBody = [signals.emotion !== "none" ? fallbackAcknowledgement() : "", buildKnownSummary(projected)].filter(Boolean).join(" ");
     }
-    if (removedTotal > 0 || (signals.market_claim && !repairCtx.hasJds)) {
+    const needsGroundingNote = removedReasons.some((r) => r === "market_claim" || r === "speculative_cause" || r === "recruiter_behavior")
+      || (signals.market_claim && !repairCtx.hasJds);
+    if (needsGroundingNote) {
       const note = groundingNote(language);
       replyBody = replyBody ? `${replyBody}\n\n${note}` : note;
     }
     const finalReply = composeReply(replyBody, structured.question, decision) || "Thanks for sharing that.";
-    const actionFlag = fixedAction.text && !structured.action_basis ? "general" : "";
+    const actionFlag = actionText && !structured.action_basis ? "general" : "";
+    // Comparison rows count only if their quotes are really in the user's own
+    // text, and only once the investigation has started.
+    const comparison = turnPhase === "investigate" ? sanitizeComparison(structured.comparison, userTexts) : [];
 
     structured = {
       ...structured,
       reply: finalReply,
-      insight: fixedInsight.text,
-      recommended_action: fixedAction.text,
+      insight: insightText,
+      recommended_action: actionText,
+      comparison,
+      uncertainty: fixedUncertainty.text,
       tip: fixedTip.text,
       question: undefined,
       topics: undefined,
@@ -1123,7 +1218,15 @@ export async function POST(request) {
       for (const t of touched) writes[`ledger.${t}`] = ledger[t];
     }
     for (const [field, source] of Object.entries(factSources)) {
-      writes[`provenance.${field}`] = { source, at: nowTs };
+      // grounded = does the value appear in the user's own words? (recorded
+      // only; a fact is never discarded because we couldn't confirm it).
+      let grounded = null;
+      if (source === "attachment" || source === "targeted_extraction") grounded = true;
+      else {
+        const v = factUpdates[field] !== undefined ? factUpdates[field] : (factUpdates[`${field}.portals`] ?? factUpdates[`${field}.direct`]);
+        grounded = isGrounded(field, v, userTexts);
+      }
+      writes[`provenance.${field}`] = { source, at: nowTs, grounded };
     }
 
     let verifiedStats = null;
