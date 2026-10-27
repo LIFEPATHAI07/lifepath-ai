@@ -37,7 +37,14 @@ import {
   isGrounded,
   sanitizeComparison,
   limitQuestions,
+  sanitizeFocus,
+  stripFiller,
+  enforceAddressStyle,
+  allowFamiliarAddress,
+  unverifiedNote,
 } from "../../../lib/caseLedger";
+import { WARNING_SIGNS, WARNING_CARD_TITLE, VERIFICATION_NOTE, verifyWarningSigns } from "../../../lib/warningSigns";
+
 import { buildSystem, buildCompactSystem, buildExtractionSystemPrompt } from "../../../lib/prompts";
 import { authenticateRequest } from "../../../lib/auth";
 
@@ -385,6 +392,8 @@ const SAFE_DEFAULTS = {
   next_question: "",
   question: null,
   comparison: [],
+  case_focus: "",
+  warning_signs: [],
   topics: [],
   signals: { emotion: "none", tired: false, direct_answer: false, correction_of: "", market_claim: false },
   tip: "",
@@ -396,7 +405,6 @@ const VALID_HYPOTHESIS_STATUS = ["untested", "investigating", "weak", "plausible
 const VALID_CONFIDENCE = ["low", "medium", "high"];
 const VALID_FEEDBACK_MODE = ["none", "signal", "diagnosis"];
 const MAX_HYPOTHESES = 4;
-
 // Clamp one model-supplied hypothesis object down to a safe, well-typed shape.
 // Never trust the model's status/confidence strings blindly — fall back to
 // conservative defaults ("untested" / "low") on anything unrecognized.
@@ -496,9 +504,13 @@ function enforceHypothesisEvidenceLadder(h) {
 
 const sanitizeStructured = (parsed) => {
   if (!parsed || typeof parsed !== "object") return null;
+  // Only fields the app knows about are taken from the model's output; any
+  // other key it invents (cards, labels, old field names) is dropped here, so
+  // it can never reach the API response or the UI.
+  const known = Object.fromEntries(Object.entries(parsed).filter(([k]) => k in SAFE_DEFAULTS));
   const merged = {
     ...SAFE_DEFAULTS,
-    ...parsed,
+    ...known,
     facts_update: { ...SAFE_DEFAULTS.facts_update, ...(parsed.facts_update || {}) },
   };
   merged.facts_update.channels = { ...SAFE_DEFAULTS.facts_update.channels, ...(parsed.facts_update?.channels || {}) };
@@ -520,6 +532,10 @@ const sanitizeStructured = (parsed) => {
     : [];
   // Raw rows only; the route verifies every quote against the user's own text.
   merged.comparison = Array.isArray(parsed.comparison) ? parsed.comparison.slice(0, 20) : [];
+  // Raw proposals only: a warning sign is kept solely when its quote is really
+  // in the user's own words, and only the seven known ids are accepted.
+  merged.warning_signs = Array.isArray(parsed.warning_signs) ? parsed.warning_signs.slice(0, 12) : [];
+  merged.case_focus = sanitizeFocus(parsed.case_focus);
   merged.diagnosis = sanitizeDiagnosis(parsed.diagnosis);
   merged.signal = typeof parsed.signal === "string" ? parsed.signal.slice(0, 300) : "";
   merged.feedback_mode = VALID_FEEDBACK_MODE.includes(parsed.feedback_mode) ? parsed.feedback_mode : "none";
@@ -845,16 +861,6 @@ export async function POST(request) {
   const elapsed = () => Date.now() - requestStartedAt;
 
   try {
-    // If NEITHER provider has a key, no request can ever succeed — fail fast
-    // with a distinct, honest error.
-    if (!process.env.GEMINI_API_KEY && !process.env.GROQ_API_KEY) {
-      console.error("[chat] no provider API keys configured", { requestId });
-      return NextResponse.json(
-        { error: true, code: "INVALID_API_KEY", message: "The AI service is not configured. Please contact support.", requestId },
-        { status: 500 }
-      );
-    }
-
     let body;
     try {
       body = await request.json();
@@ -865,9 +871,22 @@ export async function POST(request) {
         { status: 400 }
       );
     }
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return NextResponse.json({ error: true, code: "INVALID_REQUEST", message: "Malformed request.", requestId }, { status: 400 });
+    }
     const { profile = {}, action } = body;
     let messages = body.messages;
     const isBeginInvestigation = action === "begin_investigation";
+
+    // If NEITHER provider has a key, no request can ever succeed — fail fast
+    // with a distinct, honest error.
+    if (!process.env.GEMINI_API_KEY && !process.env.GROQ_API_KEY) {
+      console.error("[chat] no provider API keys configured", { requestId });
+      return NextResponse.json(
+        { error: true, code: "INVALID_API_KEY", message: "The AI service is not configured. Please contact support.", requestId },
+        { status: 500 }
+      );
+    }
 
     // Identity: a verified sign-in token wins over the browser-supplied ID.
     // (Unchanged legacy behaviour unless LIFEPATH_REQUIRE_AUTH=true — see lib/auth.js.)
@@ -1066,7 +1085,7 @@ export async function POST(request) {
 
     const parsed = parseJSON(rawReply);
     if (!parsed) {
-      console.error("[chat] validation error: AI response was not valid JSON", { requestId, stage: "parse", elapsedMs: elapsed(), rawPreview: rawReply?.slice(0, 300) });
+      console.error("[chat] validation error: AI response was not valid JSON", { requestId, stage: "parse", elapsedMs: elapsed(), rawChars: typeof rawReply === "string" ? rawReply.length : 0 });
       return NextResponse.json(
         { error: true, code: "BAD_PROVIDER_RESPONSE", message: "Could not understand the AI response. Please retry.", requestId },
         { status: 502 }
@@ -1075,8 +1094,7 @@ export async function POST(request) {
 
     let structured = sanitizeStructured(parsed);
     const signals = structured.signals;
-
-    // ════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
     // CONVERSATION MEMORY PIPELINE. Everything here is computed in memory;
     // nothing is saved until the single combined write further down.
     // ════════════════════════════════════════════════════════════════════
@@ -1086,6 +1104,17 @@ export async function POST(request) {
     const touched = new Set();
     const userTexts = recentUserTexts(messages);
     const attachedCv = !isBeginInvestigation && /\[CV attached:/.test(rawLatest);
+
+    // ── Job-offer warning signs: only the seven in lib/warningSigns.js, each
+    // backed by a verbatim quote of the user's own words. No risk score, no
+    // verdict, and nothing is verified externally (LifePath can't look up
+    // companies or recruiters). Saved ids are re-checked against the allowlist.
+    const newWarnings = verifyWarningSigns(structured.warning_signs, userTexts);
+    const savedWarnings = stateKnown
+      ? Object.keys(isObjectLike(searchState.warningSigns) ? searchState.warningSigns : {}).filter((id) => id in WARNING_SIGNS)
+      : [];
+    const allWarnings = [...new Set([...savedWarnings, ...newWarnings])];
+    const focus = sanitizeFocus(structured.case_focus) || (stateKnown ? sanitizeFocus(searchState.focus) : "");
 
     // 1. Facts the model reported (per-key, so one channel never wipes the other).
     const factUpdates = extractNonEmptyUpdates(structured.facts_update);
@@ -1181,6 +1210,10 @@ export async function POST(request) {
     }
 
     let replyBody = questionCap.text;
+    // Natural voice: no stock "thank you for sharing" openers, and "bro"/"bhai"
+    // only when the user talks that way themselves (never to formal users).
+    replyBody = stripFiller(replyBody);
+    replyBody = enforceAddressStyle(replyBody, allowFamiliarAddress(userTexts, signals.register));
     if (!replyBody) {
       // Nothing usable left: say what we actually know instead of going silent.
       replyBody = [signals.emotion !== "none" ? fallbackAcknowledgement() : "", buildKnownSummary(projected)].filter(Boolean).join(" ");
@@ -1189,6 +1222,10 @@ export async function POST(request) {
       || (signals.market_claim && !repairCtx.hasJds);
     if (needsGroundingNote) {
       const note = groundingNote(language);
+      replyBody = replyBody ? `${replyBody}\n\n${note}` : note;
+    }
+    if (removedReasons.some((r) => r === "claimed_verification" || r === "legitimacy_verdict")) {
+      const note = unverifiedNote(language);
       replyBody = replyBody ? `${replyBody}\n\n${note}` : note;
     }
     const finalReply = composeReply(replyBody, structured.question, decision) || "Thanks for sharing that.";
@@ -1227,6 +1264,21 @@ export async function POST(request) {
         grounded = isGrounded(field, v, userTexts);
       }
       writes[`provenance.${field}`] = { source, at: nowTs, grounded };
+    }
+    // Case focus; user-reported warning-sign IDS only (never their words);
+    // the most recent fact the user changed; a step the user reported on.
+    if (focus && (!stateKnown || focus !== searchState.focus)) writes.focus = focus;
+    for (const id of newWarnings) if (!savedWarnings.includes(id)) writes[`warningSigns.${id}`] = { at: nowTs };
+    if (stateKnown) {
+      for (const field of ["roleTarget", "location", "experienceLevel", "applicationsTotal", "responses", "interviews", "viewedCount"]) {
+        const prior = searchState[field];
+        const incoming = factUpdates[field];
+        if (incoming !== undefined && prior != null && prior !== "" && String(prior) !== String(incoming)) {
+          writes.lastChange = { field, from: String(prior).slice(0, 80), to: String(incoming).slice(0, 80), at: nowTs };
+          break;
+        }
+      }
+      if (signals.action_reported && searchState.activeTask?.status === "pending") writes["activeTask.status"] = "completed";
     }
 
     let verifiedStats = null;
@@ -1279,7 +1331,7 @@ export async function POST(request) {
         }
         structured = { ...structured, feedback_mode: finalFeedbackMode };
         if (finalFeedbackMode === "signal") {
-          logEvent(userId, "useful_finding_produced", { insight: (structured.insight || structured.signal || "").slice(0, 160) });
+          logEvent(userId, "useful_finding_produced", {});
         }
 
         // Never let an unearned diagnosis reach the client. Cleared BEFORE any
@@ -1292,7 +1344,7 @@ export async function POST(request) {
 
         if (diagnosisEarned) {
           searchState = await withTimeout(updateSearchState(userId, { diagnosis: structured.diagnosis }), FIRESTORE_TIMEOUT_MS, "diagnosis_persist", requestId);
-          logEvent(userId, "investigation_completed", { bottleneck: structured.diagnosis.bottleneck });
+          logEvent(userId, "investigation_completed", {});
         }
 
         if (structured.insight) {
@@ -1349,9 +1401,15 @@ export async function POST(request) {
     // The final action flag must still match what is actually shown.
     const shownActionFlag = structured.recommended_action ? actionFlag : "";
 
+    // One neutral card: the warning signs the user described, plus the note
+    // that nothing was verified. No score, no label, no verdict.
+    const warningCard = allWarnings.length
+      ? { title: WARNING_CARD_TITLE, signs: allWarnings.map((id) => WARNING_SIGNS[id]), note: VERIFICATION_NOTE }
+      : null;
+
     console.log("[chat] request complete", { requestId, elapsedMs: elapsed(), engine: usedFallback ? "groq" : "gemini", phase: turnPhase, memorySaved });
     return NextResponse.json({
-      structured: { ...structured, phase: turnPhase, show_stats: showStats, action_flag: shownActionFlag },
+      structured: { ...structured, phase: turnPhase, show_stats: showStats, action_flag: shownActionFlag, warning_card: warningCard, focus, requestId },
       verified_stats: showStats ? verifiedStats : null,
       memory_saved: memorySaved,
       language,
