@@ -141,6 +141,15 @@ const MessageBubbleUser = ({ content, onEdit, disabled }) => {
   );
 };
 
+const REPLY_FEEDBACK = [
+  { id: "helpful", label: "This helped" },
+  { id: "misunderstood", label: "It misunderstood me" },
+  { id: "repeated_question", label: "It repeated a question" },
+  { id: "generic_advice", label: "Generic advice" },
+  { id: "unsupported_claim", label: "It claimed something it can't know" },
+  { id: "unhelpful_action", label: "The suggested step isn't helpful" },
+];
+
 const DIAGNOSIS_REASONS = [
   { id: "not_my_problem", label: "That's not my problem" },
   { id: "misunderstood", label: "You misunderstood my situation" },
@@ -148,7 +157,8 @@ const DIAGNOSIS_REASONS = [
   { id: "want_to_explain", label: "I want to explain what actually happened" },
 ];
 
-const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbError, isLatest = false, busy = false }) => {
+const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, onReplyFeedback, fbState, fbError, isLatest = false, busy = false }) => {
+  const [replyFb, setReplyFb] = useState("idle"); // idle | open | saving | saved | error
   const [showReasons, setShowReasons] = useState(false);
   const [selectedReason, setSelectedReason] = useState("");
   const [correctionText, setCorrectionText] = useState("");
@@ -181,8 +191,13 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbE
       snapshot: { bottleneck: diagnosis?.bottleneck, confidence: diagnosis?.confidence },
     });
   };
+  const sendReplyFeedback = async (reasonId) => {
+    setReplyFb("saving");
+    const res = await onReplyFeedback({ reason: reasonId, rating: reasonId === "helpful" ? "positive" : "negative" });
+    setReplyFb(res?.success ? "saved" : "error");
+  };
   const submitSignal = (rating) => {
-    onFeedback?.({ feedbackType: "signal", rating, snapshot: { signal: data.signal || insight } });
+    onFeedback?.({ feedbackType: "signal", rating, snapshot: { phase: data.phase || null, requestId: data.requestId || null } });
   };
 
   return (
@@ -202,10 +217,46 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbE
           </div>
         )}
 
+        {data.warning_card && Array.isArray(data.warning_card.signs) && data.warning_card.signs.length > 0 && (
+          <div style={{ padding: "12px 16px", background: "rgba(245,158,11,.05)", borderTop: "1px solid rgba(255,255,255,.05)" }}>
+            <div style={{ color: "#f59e0b", fontSize: 11, fontWeight: 700, marginBottom: 5 }}>{data.warning_card.title}</div>
+            <ul style={{ margin: 0, paddingLeft: 18, color: "#cbd5e1", fontSize: 12.5, lineHeight: 1.6 }}>
+              {data.warning_card.signs.map((x, i) => <li key={i}>{x}</li>)}
+            </ul>
+            {data.warning_card.note && <div style={{ color: "#94a3b8", fontSize: 11, marginTop: 6, fontStyle: "italic", lineHeight: 1.5 }}>{data.warning_card.note}</div>}
+          </div>
+        )}
+
         {insight && (
           <div style={{ padding: "12px 16px", borderTop: isDiagnosis ? "none" : "1px solid rgba(255,255,255,.05)", background: isDiagnosis ? "rgba(99,102,241,.06)" : "transparent" }}>
             {isDiagnosis && <div style={{ color: "#818cf8", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 7 }}>WHAT WE FOUND</div>}
             <div style={{ color: isDiagnosis ? "#c7d2fe" : "#cbd5e1", fontSize: 13.5, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{insight}</div>
+          </div>
+        )}
+
+        {Array.isArray(data.comparison) && data.comparison.length > 0 && (
+          <div style={{ padding: "10px 16px 12px", borderTop: "1px solid rgba(255,255,255,.04)" }}>
+            {[
+              { status: "met", title: "Your CV shows", color: "#10b981" },
+              { status: "gap", title: "Not shown in your CV (that doesn't mean you lack it)", color: "#f59e0b" },
+              { status: "unknown", title: "Can't tell from what I've seen", color: "#94a3b8" },
+            ].map((group) => {
+              const rows = data.comparison.filter((r) => r.status === group.status);
+              if (rows.length === 0) return null;
+              return (
+                <div key={group.status} style={{ marginBottom: 8 }}>
+                  <div style={{ color: group.color, fontSize: 11, fontWeight: 700, marginBottom: 4 }}>{group.title}</div>
+                  <ul style={{ margin: 0, paddingLeft: 18, color: "#cbd5e1", fontSize: 12.5, lineHeight: 1.6 }}>
+                    {rows.map((r, i) => (
+                      <li key={i}>
+                        {r.requirement}{r.kind === "preferred" ? " (preferred)" : ""}
+                        {r.cv_quote ? <span style={{ color: "#64748b" }}> — "{r.cv_quote}"</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -359,7 +410,7 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbE
                 <textarea
                   value={correctionText}
                   onChange={e => setCorrectionText(e.target.value)}
-                  placeholder="Optional — tell us what actually happened, in your own words"
+                  placeholder="Optional — what actually happened, in your own words. Please don't include phone numbers, ID or bank details."
                   rows={2}
                   style={{ width: "100%", boxSizing: "border-box", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,.1)", background: "rgba(255,255,255,.03)", color: "#e2e8f0", fontSize: 12, fontFamily: "inherit", resize: "vertical", marginBottom: 8 }}
                 />
@@ -373,6 +424,29 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, fbState, fbE
                     Submit
                   </button>
                 </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {onReplyFeedback && (
+          <div style={{ padding: "8px 16px", borderTop: "1px solid rgba(255,255,255,.04)" }}>
+            {replyFb === "saved" ? (
+              <span style={{ color: "#10b981", fontSize: 11 }}>🙏 Thanks, noted.</span>
+            ) : replyFb === "idle" ? (
+              <button onClick={() => setReplyFb("open")} style={{ background: "none", border: "none", color: "#64748b", fontSize: 11, cursor: "pointer", padding: 0, fontFamily: "inherit" }}>Give feedback on this reply</button>
+            ) : (
+              <div>
+                <div style={{ color: "#64748b", fontSize: 11, marginBottom: 6 }}>How was this reply?</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {REPLY_FEEDBACK.map((r) => (
+                    <button key={r.id} disabled={replyFb === "saving"} onClick={() => sendReplyFeedback(r.id)}
+                      style={{ padding: "6px 10px", borderRadius: 100, fontSize: 11, cursor: replyFb === "saving" ? "wait" : "pointer", fontFamily: "inherit", border: "1px solid rgba(255,255,255,.1)", background: "rgba(255,255,255,.03)", color: "#94a3b8" }}>
+                      {r.label}
+                    </button>
+                  ))}
+                </div>
+                {replyFb === "error" && <div style={{ color: "#ef4444", fontSize: 11, marginTop: 6 }}>Couldn't save that. Please try again.</div>}
               </div>
             )}
           </div>
@@ -836,6 +910,16 @@ export default function LifePath() {
           <div style={{ color: "#475569", fontSize: 11, textAlign: "center", marginTop: 12 }}>
             No forms. Start by telling us what's happening.
           </div>
+
+          <div style={{ marginTop: 26, padding: "14px 16px", background: "rgba(255,255,255,.02)", border: "1px solid rgba(255,255,255,.06)", borderRadius: 14 }}>
+            <div style={{ color: "#64748b", fontSize: 10, fontWeight: 700, letterSpacing: 2, marginBottom: 8 }}>HOW YOUR INFORMATION IS USED</div>
+            <ul style={{ margin: 0, paddingLeft: 16, color: "#94a3b8", fontSize: 12, lineHeight: 1.7 }}>
+              <li>Your messages are sent to AI services (Google Gemini or Groq) to write replies, under their own terms.</li>
+              <li>LifePath saves a short case summary so it doesn't ask twice: your target role, location, experience, application counts and outcomes, and what it has concluded. If you attach a CV, its text is analysed but not saved; only the fact that you provided one is.</li>
+              <li>Please don't type OTPs, passwords, bank details or ID numbers into the chat.</li>
+              <li>"Clear chat" resets your saved case. LifePath can't look up companies or recruiters, so nothing it says about an offer has been independently verified.</li>
+            </ul>
+          </div>
         </div>
       )}
 
@@ -906,6 +990,7 @@ export default function LifePath() {
                     busy={loading}
                     onInvestigateDeeper={handleStartInvestigation}
                     onFeedback={(payload) => handleFeedback(i, payload)}
+                    onReplyFeedback={(p) => saveFeedback({ feedbackType: "reply", rating: p.rating, reason: p.reason, snapshot: { phase: msg.structured.phase || null, requestId: msg.structured.requestId || null, messageIndex: i } })}
                     fbState={fbStates[i] || "idle"}
                     fbError={fbErrors[i]}
                   />
