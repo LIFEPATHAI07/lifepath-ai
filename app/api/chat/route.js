@@ -47,6 +47,8 @@ import { WARNING_SIGNS, WARNING_CARD_TITLE, VERIFICATION_NOTE, verifyWarningSign
 
 import { buildSystem, buildCompactSystem, buildExtractionSystemPrompt } from "../../../lib/prompts";
 import { authenticateRequest } from "../../../lib/auth";
+import { normalizeMessages, createRateLimiter } from "../../../lib/requestGuards";
+import { STATUS_RANK, CONFIDENCE_RANK, enforceHypothesisEvidenceLadder, limitPromotion } from "../../../lib/evidenceGate";
 
 // Explicit Vercel function duration budget. Without this, the platform's
 // default (often as low as 10s) silently kills the function if any call
@@ -389,6 +391,7 @@ const SAFE_DEFAULTS = {
   diagnosis: { bottleneck: "", confidence: "low", reasoning: [] },
   recommended_action: "",
   action_basis: "",
+  success_check: "",
   next_question: "",
   question: null,
   comparison: [],
@@ -445,63 +448,6 @@ function sanitizeDiagnosis(d) {
 // the repeated failure of "we still don't know X" being paired with
 // "confidence: medium" in the same turn: if missingEvidence is non-empty,
 // confidence is structurally capped below medium, full stop.
-const STATUS_RANK = { untested: 0, investigating: 1, weak: 1, plausible: 2, supported: 3, confirmed: 4 };
-const CONFIDENCE_RANK = { low: 0, medium: 1, high: 2 };
-const STATUS_ORDER = ["untested", "investigating", "plausible", "supported", "confirmed"];
-const CONFIDENCE_ORDER = ["low", "medium", "high"];
-
-function capStatus(status, maxRank) {
-  if ((STATUS_RANK[status] ?? 0) <= maxRank) return status;
-  for (let i = STATUS_ORDER.length - 1; i >= 0; i--) {
-    if ((STATUS_RANK[STATUS_ORDER[i]] ?? 0) <= maxRank) return STATUS_ORDER[i];
-  }
-  return "untested";
-}
-function capConfidence(confidence, maxRank) {
-  if ((CONFIDENCE_RANK[confidence] ?? 0) <= maxRank) return confidence;
-  for (let i = CONFIDENCE_ORDER.length - 1; i >= 0; i--) {
-    if ((CONFIDENCE_RANK[CONFIDENCE_ORDER[i]] ?? 0) <= maxRank) return CONFIDENCE_ORDER[i];
-  }
-  return "low";
-}
-
-function enforceHypothesisEvidenceLadder(h) {
-  const hasSupport = !!h.supportingEvidence;
-  const hasMissing = !!h.missingEvidence;
-  const hasContradiction = !!h.contradictingEvidence;
-
-  let maxStatusRank;
-  let maxConfidenceRank;
-
-  if (!hasSupport) {
-    // No claim-specific supporting evidence at all → can't be more than
-    // "investigating", confidence must stay "low".
-    maxStatusRank = STATUS_RANK.investigating;
-    maxConfidenceRank = CONFIDENCE_RANK.low;
-  } else if (hasMissing) {
-    // Support exists, but the model itself flags evidence still missing —
-    // "worth investigating" is not "medium confidence".
-    maxStatusRank = STATUS_RANK.plausible;
-    maxConfidenceRank = CONFIDENCE_RANK.low;
-  } else if (hasContradiction) {
-    // Nothing flagged missing, but there's a live, unresolved contradiction
-    // — can be taken seriously, but not confirmed.
-    maxStatusRank = STATUS_RANK.plausible;
-    maxConfidenceRank = CONFIDENCE_RANK.medium;
-  } else {
-    // Support present, nothing missing, no live contradiction — the
-    // model's own claim is allowed through in full.
-    maxStatusRank = STATUS_RANK.confirmed;
-    maxConfidenceRank = CONFIDENCE_RANK.high;
-  }
-
-  return {
-    ...h,
-    status: capStatus(h.status, maxStatusRank),
-    confidence: capConfidence(h.confidence, maxConfidenceRank),
-  };
-}
-
 const sanitizeStructured = (parsed) => {
   if (!parsed || typeof parsed !== "object") return null;
   // Only fields the app knows about are taken from the model's output; any
@@ -519,7 +465,7 @@ const sanitizeStructured = (parsed) => {
   // Every field the UI renders as text must actually be a string — a model
   // that returns an object/number/null here would otherwise crash the card
   // (and break the server-side text checks below).
-  for (const key of ["reply", "insight", "uncertainty", "recommended_action", "action_basis", "next_question", "tip"]) {
+  for (const key of ["reply", "insight", "uncertainty", "recommended_action", "action_basis", "success_check", "next_question", "tip"]) {
     merged[key] = typeof parsed[key] === "string" ? parsed[key] : "";
   }
 
@@ -703,6 +649,10 @@ function computeDiagnosisEligibility(state, diagnosis) {
   // isolation — require at least 2 tracked hypotheses so a single
   // unopposed idea can never become a diagnosis on its own.
   if (hypotheses.length < 2) return false;
+  // At least one competing explanation must have been examined (weakened,
+  // contradicted or flagged with missing evidence), not just left untested.
+  const examinedRivals = hypotheses.filter((h) => !qualifying.includes(h) && (h.status !== "untested" || h.contradictingEvidence || h.missingEvidence));
+  if (examinedRivals.length === 0) return false;
 
   if (diagnosis?.bottleneck) {
     // Loose word-overlap check that the diagnosis is actually ABOUT one of
@@ -761,39 +711,13 @@ function recentUserTexts(messages) {
   return last.map((m, i) => m.content.slice(0, i === last.length - 1 ? 12000 : 1500));
 }
 
-// ── request validation and a best-effort rate limit ─────────────────────
-const MAX_MESSAGES = 60;
-const MAX_CONTENT_CHARS = 12000;
-
-// Returns a clean message array, or "too_many" / "too_long" / null.
-function normalizeMessages(raw) {
-  if (!Array.isArray(raw)) return null;
-  if (raw.length > MAX_MESSAGES) return "too_many";
-  const out = [];
-  for (const m of raw) {
-    if (!m || (m.role !== "user" && m.role !== "assistant") || typeof m.content !== "string") continue;
-    if (m.content.length > MAX_CONTENT_CHARS) return "too_long";
-    if (m.content.trim()) out.push({ role: m.role, content: m.content });
-  }
-  return out;
-}
-
-// In-memory sliding window per user/IP. Serverless instances don't share
-// memory, so this is a speed bump against runaway loops and casual abuse, not
-// a hard guarantee; real protection needs a shared store (e.g. Upstash/Vercel KV).
-const rateBuckets = new Map();
-function isRateLimited(key) {
-  const limit = Number(process.env.LIFEPATH_RATE_LIMIT) > 0 ? Number(process.env.LIFEPATH_RATE_LIMIT) : 20;
-  const now = Date.now();
-  const recent = (rateBuckets.get(key) || []).filter((t) => now - t < 60000);
-  if (recent.length >= limit) { rateBuckets.set(key, recent); return true; }
-  recent.push(now);
-  rateBuckets.set(key, recent);
-  if (rateBuckets.size > 5000) {
-    for (const [k, v] of rateBuckets) if (!v.some((t) => now - t < 60000)) rateBuckets.delete(k);
-  }
-  return false;
-}
+// ── request validation and a best-effort rate limit (see lib/requestGuards.js)
+const baseLimit = Number(process.env.LIFEPATH_RATE_LIMIT) > 0 ? Number(process.env.LIFEPATH_RATE_LIMIT) : 20;
+const userLimiter = createRateLimiter({ limit: baseLimit });
+// The user id comes from the browser and can be changed on every request, so
+// the network address gets its own, wider limit that rotating ids cannot dodge.
+const ipLimiter = createRateLimiter({ limit: baseLimit * 3 });
+const isRateLimited = (userKey, ip) => userLimiter(userKey || "anonymous") || (ip ? ipLimiter(ip) : false);
 
 const safeName = (name) => String(name || "").replace(/[^\p{L}\p{N} .'-]/gu, "").slice(0, 40);
 
@@ -846,9 +770,9 @@ function understandGate(structured, signals) {
     ...structured,
     insight: "",
     signal: "",
-    uncertainty: "",
     comparison: [],
     recommended_action: keepAction ? structured.recommended_action : "",
+    success_check: keepAction ? structured.success_check : "",
   };
 }
 
@@ -898,7 +822,7 @@ export async function POST(request) {
 
     // Best-effort rate limit (see isRateLimited).
     const clientIp = (request?.headers?.get?.("x-forwarded-for") || "").split(",")[0].trim();
-    if (isRateLimited(userId || clientIp || "anonymous")) {
+    if (isRateLimited(userId || clientIp, clientIp)) {
       return NextResponse.json(
         { error: true, code: "RATE_LIMIT", message: "You're sending messages very quickly. Please wait a moment and try again.", requestId },
         { status: 429 }
@@ -1104,6 +1028,7 @@ export async function POST(request) {
     const touched = new Set();
     const userTexts = recentUserTexts(messages);
     const attachedCv = !isBeginInvestigation && /\[CV attached:/.test(rawLatest);
+    const attachedJd = !isBeginInvestigation && /\[Job post attached:/.test(rawLatest);
 
     // ── Job-offer warning signs: only the seven in lib/warningSigns.js, each
     // backed by a verbatim quote of the user's own words. No risk score, no
@@ -1124,6 +1049,10 @@ export async function POST(request) {
     if (attachedCv && !(stateKnown && searchState.cvProvided === true)) {
       factUpdates.cvProvided = true;
       factSources.cvProvided = "attachment";
+    }
+    if (attachedJd && !(stateKnown && searchState.jobDescriptionsProvided === true)) {
+      factUpdates.jobDescriptionsProvided = true;
+      factSources.jobDescriptionsProvided = "attachment";
     }
 
     // 2. Statuses the user settled this turn, and corrections.
@@ -1160,7 +1089,13 @@ export async function POST(request) {
     }
 
     // 4. Question gate — only the QUESTION can be dropped, never the reply.
-    const decision = evaluateQuestion(ledger, structured.question, signals);
+    // Questions the assistant already asked earlier in this chat (the browser sends
+    // earlier replies as text), so the same question is never asked twice.
+    const previousQuestions = normalizedMessages
+      .filter((m) => m.role === "assistant")
+      .slice(-6)
+      .flatMap((m) => m.content.split(/(?<=[?.!])\s+/).filter((x) => x.includes("?")));
+    const decision = evaluateQuestion(ledger, structured.question, signals, { state: projected, previousQuestions });
     if (structured.question && !decision.allow) {
       console.log("[chat] question not shown", { requestId, topic: structured.question.topic || null, reason: decision.reason });
     }
@@ -1185,6 +1120,7 @@ export async function POST(request) {
     const fixedAction = repairText(structured.recommended_action, repairCtx);
     const fixedTip = repairText(structured.tip, repairCtx);
     const fixedUncertainty = repairText(structured.uncertainty, repairCtx);
+    const fixedCheck = repairText(structured.success_check, repairCtx);
     const removedTotal = fixedReply.removed + fixedInsight.removed + fixedAction.removed + fixedTip.removed + fixedUncertainty.removed;
     const removedReasons = [...fixedReply.reasons, ...fixedInsight.reasons, ...fixedAction.reasons, ...fixedTip.reasons, ...fixedUncertainty.reasons];
     if (removedTotal > 0) {
@@ -1241,6 +1177,7 @@ export async function POST(request) {
       recommended_action: actionText,
       comparison,
       uncertainty: fixedUncertainty.text,
+      success_check: actionText ? fixedCheck.text : "",
       tip: fixedTip.text,
       question: undefined,
       topics: undefined,
@@ -1304,6 +1241,7 @@ export async function POST(request) {
         verifiedStats = computeVerifiedStats(searchState);
 
         if (Array.isArray(structured.hypotheses) && structured.hypotheses.length > 0) {
+          structured = { ...structured, hypotheses: limitPromotion(structured.hypotheses, searchState?.hypotheses, turnPhase) };
           searchState = await withTimeout(updateSearchState(userId, { hypotheses: structured.hypotheses }), FIRESTORE_TIMEOUT_MS, "hypotheses_persist", requestId);
         }
 
@@ -1322,7 +1260,7 @@ export async function POST(request) {
         }
 
         const evidenceFeedbackMode = computeFeedbackMode(structured, searchState);
-        const finalFeedbackMode = turnPhase === "understand" ? "none" : evidenceFeedbackMode;
+        const finalFeedbackMode = turnPhase === "understand" ? "none" : (isBeginInvestigation && evidenceFeedbackMode === "diagnosis" ? "signal" : evidenceFeedbackMode);
         if (finalFeedbackMode !== structured.feedback_mode) {
           console.log("[chat] feedback_mode downgraded", {
             requestId, claimed: structured.feedback_mode, final: finalFeedbackMode,
@@ -1336,7 +1274,7 @@ export async function POST(request) {
 
         // Never let an unearned diagnosis reach the client. Cleared BEFORE any
         // further write, so a later persistence failure can't resurrect it.
-        const diagnosisEarned = finalFeedbackMode === "diagnosis" && !!structured.diagnosis?.bottleneck;
+        const diagnosisEarned = !isBeginInvestigation && finalFeedbackMode === "diagnosis" && !!structured.diagnosis?.bottleneck;
         if (!diagnosisEarned) {
           structured = { ...structured, diagnosis: EMPTY_DIAGNOSIS() };
         }
@@ -1347,12 +1285,12 @@ export async function POST(request) {
           logEvent(userId, "investigation_completed", {});
         }
 
-        if (structured.insight) {
-          fireAndForget(addSearchFact(userId, structured.insight), "fact_log", requestId);
-        }
-        if (structured.recommended_action) {
-          fireAndForget(setActiveSearchTask(userId, structured.recommended_action), "task_set", requestId);
-        }
+        // Serverless functions can freeze right after the response, which
+        // silently lost these writes. Wait briefly for them instead.
+        const bookkeeping = [];
+        if (structured.insight) bookkeeping.push(withTimeout(addSearchFact(userId, structured.insight), 1500, "fact_log", requestId));
+        if (structured.recommended_action) bookkeeping.push(withTimeout(setActiveSearchTask(userId, structured.recommended_action), 1500, "task_set", requestId));
+        if (bookkeeping.length) await Promise.allSettled(bookkeeping);
         console.log("[chat] state persisted", { requestId, elapsedMs: elapsed() });
       } catch (err) {
         console.error("[chat] search state update failed (non-fatal)", { requestId, code: err?.code, message: err?.message, evidenceGateCompleted, elapsedMs: elapsed() });
