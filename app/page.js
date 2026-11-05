@@ -313,6 +313,9 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, onReplyFeedb
           <div style={{ padding: "12px 16px", background: "rgba(245,158,11,.05)", borderTop: "1px solid rgba(255,255,255,.04)" }}>
             <div style={{ color: "#f59e0b", fontSize: 10, fontWeight: 700, marginBottom: 5 }}>{isDiagnosis ? "WHAT WE'D INVESTIGATE NEXT" : "A small next step"}</div>
             <div style={{ color: "#fbbf24", fontSize: 13.5, lineHeight: 1.65, fontWeight: 600, whiteSpace: "pre-wrap" }}>{recommended_action}</div>
+            {data.success_check && (
+              <div style={{ color: "#94a3b8", fontSize: 12, lineHeight: 1.6, marginTop: 8 }}>How to tell if it worked: {data.success_check}</div>
+            )}
             {data.action_flag === "general" && (
               <div style={{ color: "#94a3b8", fontSize: 11, marginTop: 6, fontStyle: "italic" }}>This is a general suggestion — it isn't tied to your specific evidence yet.</div>
             )}
@@ -429,7 +432,7 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, onReplyFeedb
           </div>
         )}
 
-        {onReplyFeedback && (
+        {onReplyFeedback && isLatest && (feedbackMode !== "none" || !!data.recommended_action) && (
           <div style={{ padding: "8px 16px", borderTop: "1px solid rgba(255,255,255,.04)" }}>
             {replyFb === "saved" ? (
               <span style={{ color: "#10b981", fontSize: 11 }}>🙏 Thanks, noted.</span>
@@ -473,7 +476,7 @@ export default function LifePath() {
     return Array.isArray(stored) ? stored : [];
   });
   const [input, setInput] = useState("");
-  const [cvFile, setCvFile] = useState(null);
+  const [docs, setDocs] = useState([]); // attached files: { name, text, kind: "cv" | "job" }
   const [extracting, setExtracting] = useState(false);
   const [loading, setLoading] = useState(false);
   const [fbStates, setFbStates] = useState({});
@@ -525,14 +528,10 @@ export default function LifePath() {
     });
   };
 
-  const handleFileUpload = async (e) => {
-    const file = e.target.files?.[0];
-    // Always reset so selecting the exact same file again still fires onChange.
-    if (fileRef.current) fileRef.current.value = "";
-    if (!file) return;
-
-    if (file.name.toLowerCase().endsWith(".pdf")) {
-      setExtracting(true);
+  // Reads one PDF/TXT file. Returns { name, text } or { error }.
+  const readOneFile = async (file) => {
+    const lower = file.name.toLowerCase();
+    if (lower.endsWith(".pdf")) {
       try {
         const loaded = await loadPdfJs();
         if (!loaded || !window.pdfjsLib) throw new Error("pdfjs-unavailable");
@@ -544,40 +543,53 @@ export default function LifePath() {
           const content = await page.getTextContent();
           fullText += content.items.map((item) => item.str).join(" ") + "\n";
         }
-        if (fullText.trim().length > 80) {
-          setCvFile({ name: file.name, text: fullText.trim() });
-        } else {
-          setMessages((m) => [...m, { role: "assistant", content: "⚠️ This PDF doesn't appear to have readable text — it may be a scanned image. Please paste your CV text directly in the message box instead.", structured: null, isError: true }]);
-        }
+        if (fullText.trim().length > 80) return { name: file.name, text: fullText.trim() };
+        return { error: `⚠️ "${file.name}" doesn't appear to have readable text — it may be a scanned image. Please paste its text in the message box instead.` };
       } catch {
-        setMessages((m) => [...m, { role: "assistant", content: "⚠️ Couldn't read that PDF. It may be corrupted or scanned. You can paste your CV text directly in the message box instead.", structured: null, isError: true }]);
-      } finally {
-        setExtracting(false);
+        return { error: `⚠️ Couldn't read "${file.name}". It may be corrupted or scanned. You can paste its text in the message box instead.` };
       }
-      return;
     }
+    if (lower.endsWith(".txt")) {
+      try {
+        const text = await file.text();
+        if (!text || text.trim().length < 30) return { error: `⚠️ Couldn't read "${file.name}". You can paste its text in the message box instead.` };
+        return { name: file.name, text: text.trim() };
+      } catch {
+        return { error: `⚠️ File error with "${file.name}". You can paste its text instead.` };
+      }
+    }
+    return { error: `⚠️ "${file.name}": please upload a PDF or TXT file — other formats aren't supported yet. You can paste the text instead.` };
+  };
 
-    if (file.name.toLowerCase().endsWith(".txt")) {
-      setExtracting(true);
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const text = ev.target.result;
-        setExtracting(false);
-        if (!text || text.trim().length < 30) {
-          setMessages((m) => [...m, { role: "assistant", content: "⚠️ Couldn't read that file. You can paste your CV text directly in the message box instead.", structured: null, isError: true }]);
-          return;
+  const MAX_DOCS = 3;
+  const handleFileUpload = async (e) => {
+    const files = Array.from(e.target.files || []);
+    // Always reset so selecting the exact same file again still fires onChange.
+    if (fileRef.current) fileRef.current.value = "";
+    if (files.length === 0) return;
+    setExtracting(true);
+    const problems = [];
+    let added = [];
+    for (const file of files) {
+      const r = await readOneFile(file);
+      if (r.error) problems.push(r.error); else added.push(r);
+    }
+    setExtracting(false);
+    if (added.length > 0) {
+      setDocs((cur) => {
+        const merged = [...cur];
+        for (const d of added) {
+          if (merged.some((x) => x.name === d.name)) continue;
+          // The first file defaults to the CV, later ones to job posts; the chip can be switched.
+          merged.push({ ...d, kind: merged.some((x) => x.kind === "cv") ? "job" : "cv" });
         }
-        setCvFile({ name: file.name, text: text.trim() });
-      };
-      reader.onerror = () => {
-        setExtracting(false);
-        setMessages((m) => [...m, { role: "assistant", content: "⚠️ File error. You can paste your CV text directly instead.", structured: null, isError: true }]);
-      };
-      reader.readAsText(file);
-      return;
+        if (merged.length > MAX_DOCS) problems.push(`⚠️ You can attach up to ${MAX_DOCS} files at once; the extra files were left out.`);
+        return merged.slice(0, MAX_DOCS);
+      });
     }
-
-    setMessages((m) => [...m, { role: "assistant", content: "⚠️ Please upload a PDF or TXT file — other formats aren't supported yet. You can paste your CV text directly instead.", structured: null, isError: true }]);
+    if (problems.length > 0) {
+      setMessages((m) => [...m, ...problems.map((content) => ({ role: "assistant", content, structured: null, isError: true }))]);
+    }
   };
 
   // Hide the "start the investigation" button on the most recent assistant
@@ -594,7 +606,7 @@ export default function LifePath() {
 
   const sendMessage = async (overrideText, baseMessages, requestAction = null) => {
     const userMsg = requestAction ? "" : (overrideText ?? input).trim();
-    if ((!userMsg && !cvFile && !requestAction) || loading || sendingRef.current) return;
+    if ((!userMsg && docs.length === 0 && !requestAction) || loading || sendingRef.current) return;
     sendingRef.current = true;
 
     const usage = getUsage();
@@ -611,46 +623,61 @@ export default function LifePath() {
 
     // A button action never carries the typed text or an attached CV: those
     // stay in the input box untouched.
-    const attachedCv = requestAction ? null : cvFile;
+    const attachedDocs = requestAction ? [] : docs;
     if (!requestAction) {
       setInput("");
-      setCvFile(null);
+      setDocs([]);
     }
     setErrorBanner("");
 
     const MAX_HISTORY_MESSAGES = 12;
     const MAX_MESSAGE_CHARS = 1200;
-    const MAX_CV_CHARS = 10000;
+    const MAX_TYPED_CHARS = 4000;   // pasted job descriptions, CV text, etc.
+    const DOC_TOTAL_CHARS = 7000;   // shared by all attached files; typed + files stay under the server's 12,000 limit
+    const docBlocks = (list) => {
+      const each = Math.floor(DOC_TOTAL_CHARS / Math.max(list.length, 1));
+      return list.map((d) => `[${d.kind === "job" ? "Job post" : "CV"} attached: ${d.name}]\n${truncate(d.text, each)}`).join("\n\n");
+    };
     const truncate = (text, max = MAX_MESSAGE_CHARS) => {
       if (!text) return "";
       return text.length > max ? text.slice(0, max) + " ...[truncated]" : text;
     };
 
+    // The CV text is kept in the message object (this session only, never
+    // saved to the database) so later turns can still see it. Only the most
+    // recent CV travels with the history; older ones are just a marker.
+    let lastCvIdx = -1;
+    historyBase.forEach((m, i) => { if (m.docs?.length) lastCvIdx = i; });
     // Local warnings (isError) are UI-only; they are never sent to the AI.
     const fullApiMessages = historyBase
-      .filter(m => !m.isError && (m.content || m.structured))
-      .map(m => ({
-        role: m.role,
-        content: truncate(m.content) || (m.structured
+      .map((m, i) => ({ m, i }))
+      .filter(({ m }) => !m.isError && (m.content || m.structured))
+      .map(({ m, i }) => {
+        let content = truncate(m.content, m.role === "user" ? 2500 : MAX_MESSAGE_CHARS) || (m.structured
           ? `[LifePath: ${truncate(m.structured.reply) || ""}]`
-          : ""),
-      }))
+          : "");
+        if (m.role === "user" && m.docs?.length && i === lastCvIdx && !requestAction) {
+          content = `${truncate(m.typedText || "", MAX_TYPED_CHARS)}\n\n${docBlocks(m.docs)}`.trim();
+        }
+        return { role: m.role, content };
+      })
       .filter(m => m.content);
 
     const apiMessages = fullApiMessages.slice(-MAX_HISTORY_MESSAGES);
 
-    let outgoingText = truncate(userMsg);
+    let outgoingText = truncate(userMsg, MAX_TYPED_CHARS);
     let displayText = userMsg;
-    if (attachedCv) {
-      const cvBlock = `[CV attached: ${attachedCv.name}]\n${truncate(attachedCv.text, MAX_CV_CHARS)}`;
-      outgoingText = outgoingText ? `${outgoingText}\n\n${cvBlock}` : cvBlock;
-      displayText = userMsg ? `${userMsg}\n\n📎 ${attachedCv.name}` : `📎 ${attachedCv.name}`;
+    if (attachedDocs.length > 0) {
+      const blocks = docBlocks(attachedDocs);
+      const names = attachedDocs.map((d) => d.name).join(", ");
+      outgoingText = outgoingText ? `${outgoingText}\n\n${blocks}` : blocks;
+      displayText = userMsg ? `${userMsg}\n\n📎 ${names}` : `📎 ${names}`;
     }
 
     if (outgoingText) apiMessages.push({ role: "user", content: outgoingText });
 
     const newMsgs = displayText
-      ? [...historyBase, { role: "user", content: displayText }]
+      ? [...historyBase, { role: "user", content: displayText, ...(attachedDocs.length > 0 ? { docs: attachedDocs, typedText: userMsg } : {}) }]
       : historyBase;
     setMessages(newMsgs);
     setLoading(true);
@@ -708,7 +735,7 @@ export default function LifePath() {
         // without retyping and without a duplicate bubble.
         setMessages(historyBase);
         if (userMsg) setInput((prev) => prev || userMsg);
-        if (attachedCv) setCvFile(attachedCv);
+        if (attachedDocs.length > 0) setDocs(attachedDocs);
       }
       // The failed attempt shouldn't use up one of the daily messages.
       S.set("lp_usage", usage);
@@ -802,7 +829,7 @@ export default function LifePath() {
       setMessages([]);
       setFbStates({});
       setFbErrors({});
-      setCvFile(null);
+      setDocs([]);
       setErrorBanner("");
       S.set("lp_chat_history_v2", []);
       setShowClearConfirm(false);
@@ -1026,17 +1053,24 @@ export default function LifePath() {
                 Reading your file...
               </div>
             )}
-            {cvFile && !extracting && (
-              <div style={{ marginBottom: 9, padding: "7px 13px", background: "rgba(99,102,241,.07)", border: "1px solid rgba(99,102,241,.2)", borderRadius: 10, color: "#818cf8", fontSize: 11, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span>📎 {cvFile.name}</span>
-                <button onClick={() => setCvFile(null)} style={{ background: "none", border: "none", color: "#ef4444", fontSize: 13, cursor: "pointer" }}>✕</button>
+            {docs.length > 0 && !extracting && docs.map((d) => (
+              <div key={d.name} style={{ marginBottom: 6, padding: "7px 13px", background: "rgba(99,102,241,.07)", border: "1px solid rgba(99,102,241,.2)", borderRadius: 10, color: "#818cf8", fontSize: 11, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>📎 {d.name}</span>
+                <span style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+                  <button onClick={() => setDocs((cur) => cur.map((x) => x.name === d.name ? { ...x, kind: x.kind === "cv" ? "job" : "cv" } : x))}
+                    style={{ background: "rgba(99,102,241,.15)", border: "none", color: "#a5b4fc", fontSize: 11, borderRadius: 6, padding: "3px 8px", cursor: "pointer" }}>
+                    {d.kind === "cv" ? "CV" : "Job post"} ⇄
+                  </button>
+                  <button onClick={() => setDocs((cur) => cur.filter((x) => x.name !== d.name))} style={{ background: "none", border: "none", color: "#ef4444", fontSize: 13, cursor: "pointer" }}>✕</button>
+                </span>
               </div>
-            )}
+            ))}
             <div style={{ display: "flex", gap: 9, alignItems: "flex-end" }}>
               <input
                 ref={fileRef}
                 type="file"
                 accept=".pdf,.txt"
+                multiple
                 onChange={handleFileUpload}
                 style={{ position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap", border: 0 }}
               />
@@ -1053,8 +1087,8 @@ export default function LifePath() {
                 rows={2}
                 style={{ flex: 1, background: "rgba(255,255,255,.03)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 14, padding: "11px 13px", color: "#e2e8f0", fontSize: 14, resize: "none", lineHeight: 1.5 }}
               />
-              <button className="btn" onClick={() => sendMessage()} disabled={loading || (!input.trim() && !cvFile) || sendingRef.current}
-                style={{ width: 44, height: 44, borderRadius: 13, flexShrink: 0, background: loading || (!input.trim() && !cvFile) ? "rgba(255,255,255,.04)" : "linear-gradient(135deg,#6366f1,#4f46e5)", border: "none", cursor: loading || (!input.trim() && !cvFile) ? "not-allowed" : "pointer", fontSize: 18 }}>
+              <button className="btn" onClick={() => sendMessage()} disabled={loading || (!input.trim() && docs.length === 0) || sendingRef.current}
+                style={{ width: 44, height: 44, borderRadius: 13, flexShrink: 0, background: loading || (!input.trim() && docs.length === 0) ? "rgba(255,255,255,.04)" : "linear-gradient(135deg,#6366f1,#4f46e5)", border: "none", cursor: loading || (!input.trim() && docs.length === 0) ? "not-allowed" : "pointer", fontSize: 18 }}>
                 {loading ? "⏳" : "↑"}
               </button>
             </div>
