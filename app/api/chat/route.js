@@ -19,6 +19,8 @@ import {
   sanitizeQuestion,
   sanitizeSignals,
   applyTopicUpdates,
+  verifyMainTopics,
+  inferQuestionTopic,
   reconcileDerived,
   markCorrection,
   recordAsked,
@@ -47,6 +49,8 @@ import { WARNING_SIGNS, WARNING_CARD_TITLE, VERIFICATION_NOTE, verifyWarningSign
 
 import { buildSystem, buildCompactSystem, buildExtractionSystemPrompt } from "../../../lib/prompts";
 import { authenticateRequest } from "../../../lib/auth";
+import { summarizeCaseFacts } from "../../../lib/caseSummary";
+import { sanitizeStage, stageOf, deriveOutcomeStage, computeReadiness, limitationsText, validateTask, fallbackTask, stripCompletenessClaims, TOPIC_REASONS } from "../../../lib/readiness";
 import { normalizeMessages, createRateLimiter } from "../../../lib/requestGuards";
 import { STATUS_RANK, CONFIDENCE_RANK, enforceHypothesisEvidenceLadder, limitPromotion } from "../../../lib/evidenceGate";
 
@@ -392,6 +396,11 @@ const SAFE_DEFAULTS = {
   recommended_action: "",
   action_basis: "",
   success_check: "",
+  action_how: "",
+  action_why: "",
+  action_done: "",
+  action_minutes: null,
+  outcome_stage: "",
   next_question: "",
   question: null,
   comparison: [],
@@ -401,6 +410,7 @@ const SAFE_DEFAULTS = {
   signals: { emotion: "none", tired: false, direct_answer: false, correction_of: "", market_claim: false },
   tip: "",
   ready_to_investigate_deeper: false,
+  case_facts: [],
   feedback_mode: "none",
 };
 
@@ -465,7 +475,7 @@ const sanitizeStructured = (parsed) => {
   // Every field the UI renders as text must actually be a string — a model
   // that returns an object/number/null here would otherwise crash the card
   // (and break the server-side text checks below).
-  for (const key of ["reply", "insight", "uncertainty", "recommended_action", "action_basis", "success_check", "next_question", "tip"]) {
+  for (const key of ["reply", "insight", "uncertainty", "recommended_action", "action_basis", "success_check", "action_how", "action_why", "action_done", "next_question", "tip"]) {
     merged[key] = typeof parsed[key] === "string" ? parsed[key] : "";
   }
 
@@ -482,6 +492,8 @@ const sanitizeStructured = (parsed) => {
   // in the user's own words, and only the seven known ids are accepted.
   merged.warning_signs = Array.isArray(parsed.warning_signs) ? parsed.warning_signs.slice(0, 12) : [];
   merged.case_focus = sanitizeFocus(parsed.case_focus);
+  merged.outcome_stage = sanitizeStage(parsed.outcome_stage);
+  { const m = Number(parsed.action_minutes); merged.action_minutes = parsed.action_minutes != null && parsed.action_minutes !== "" && Number.isFinite(m) ? Math.round(m) : null; }
   merged.diagnosis = sanitizeDiagnosis(parsed.diagnosis);
   merged.signal = typeof parsed.signal === "string" ? parsed.signal.slice(0, 300) : "";
   merged.feedback_mode = VALID_FEEDBACK_MODE.includes(parsed.feedback_mode) ? parsed.feedback_mode : "none";
@@ -773,8 +785,15 @@ function understandGate(structured, signals) {
     comparison: [],
     recommended_action: keepAction ? structured.recommended_action : "",
     success_check: keepAction ? structured.success_check : "",
+    action_how: keepAction ? structured.action_how : "",
+    action_why: keepAction ? structured.action_why : "",
+    action_done: keepAction ? structured.action_done : "",
+    action_minutes: keepAction ? structured.action_minutes : null,
   };
 }
+
+// Requests the server creates itself (the automatic move into the investigation).
+const internalTransitions = new WeakSet();
 
 export async function POST(request) {
   // Hoisted OUTSIDE the try block on purpose: a `const`/`let` declared
@@ -798,6 +817,7 @@ export async function POST(request) {
     if (!body || typeof body !== "object" || Array.isArray(body)) {
       return NextResponse.json({ error: true, code: "INVALID_REQUEST", message: "Malformed request.", requestId }, { status: 400 });
     }
+    const isInternal = internalTransitions.has(request);
     const { profile = {}, action } = body;
     let messages = body.messages;
     const isBeginInvestigation = action === "begin_investigation";
@@ -822,7 +842,7 @@ export async function POST(request) {
 
     // Best-effort rate limit (see isRateLimited).
     const clientIp = (request?.headers?.get?.("x-forwarded-for") || "").split(",")[0].trim();
-    if (isRateLimited(userId || clientIp, clientIp)) {
+    if (!isInternal && isRateLimited(userId || clientIp, clientIp)) {
       return NextResponse.json(
         { error: true, code: "RATE_LIMIT", message: "You're sending messages very quickly. Please wait a moment and try again.", requestId },
         { status: 429 }
@@ -1056,7 +1076,7 @@ export async function POST(request) {
     }
 
     // 2. Statuses the user settled this turn, and corrections.
-    let ledger = applyTopicUpdates(ledgerBefore, structured.topics, nowTs, touched);
+    let ledger = applyTopicUpdates(ledgerBefore, verifyMainTopics(structured.topics, userTexts), nowTs, touched);
     ledger = markCorrection(ledger, signals.correction_of, nowTs, touched);
     let projected = applyUpdatesToState(stateKnown ? searchState : {}, factUpdates);
     ledger = reconcileDerived(ledger, projected, nowTs, touched);
@@ -1088,6 +1108,17 @@ export async function POST(request) {
       }
     }
 
+    // 3b. Automatic readiness. The server decides when the facts are enough to
+    //     start the investigation (no button). It is computed from the facts as
+    //     they will be saved, BEFORE the question is counted, so a reply that
+    //     is about to be replaced never uses up the question budget.
+    const stageNow = sanitizeStage(structured.outcome_stage) || (stateKnown ? (sanitizeStage(searchState.outcomeStage) || deriveOutcomeStage({ ...projected, focus })) : "");
+    const questionsBefore = stateKnown && Number.isFinite(searchState.questionsAsked) ? searchState.questionsAsked : 0;
+    const readinessNow = stateKnown && turnPhase === "understand" && !isInternal
+      ? computeReadiness({ ...projected, ledger, focus, outcomeStage: stageNow, questionsAsked: questionsBefore }, { warningIds: allWarnings })
+      : null;
+    const willTransition = !!readinessNow?.ready;
+
     // 4. Question gate — only the QUESTION can be dropped, never the reply.
     // Questions the assistant already asked earlier in this chat (the browser sends
     // earlier replies as text), so the same question is never asked twice.
@@ -1095,7 +1126,13 @@ export async function POST(request) {
       .filter((m) => m.role === "assistant")
       .slice(-6)
       .flatMap((m) => m.content.split(/(?<=[?.!])\s+/).filter((x) => x.includes("?")));
-    const decision = evaluateQuestion(ledger, structured.question, signals, { state: projected, previousQuestions });
+    let decision = evaluateQuestion(ledger, structured.question, signals, { state: projected, previousQuestions });
+    // Every question needs a reason (the model's own, or the standard one for
+    // its topic). One with no reason and no known topic is not shown.
+    const questionTopic = structured.question?.topic || inferQuestionTopic(structured.question?.text);
+    const questionWhy = structured.question ? (structured.question.why || TOPIC_REASONS[questionTopic] || "") : "";
+    if (decision.allow && structured.question && !questionWhy) decision = { allow: false, reason: "no_reason" };
+    if (willTransition && structured.question) decision = { allow: false, reason: "transitioning" };
     if (structured.question && !decision.allow) {
       console.log("[chat] question not shown", { requestId, topic: structured.question.topic || null, reason: decision.reason });
     }
@@ -1136,6 +1173,29 @@ export async function POST(request) {
     if (insightText && isRepeat(insightText, alreadySaid)) { console.log("[chat] repeated insight dropped", { requestId }); insightText = ""; }
     if (actionText && isRepeat(actionText, alreadySaid)) { console.log("[chat] repeated next step dropped", { requestId }); actionText = ""; }
 
+    // A next task is shown only when it is concrete: what, how, why and what
+    // done looks like, small enough to finish, and not generic advice.
+    let taskCheck = null;
+    if (actionText) {
+      const how = repairText(structured.action_how, repairCtx).text;
+      const why = repairText(structured.action_why || structured.action_basis, repairCtx).text;
+      const done = repairText(structured.action_done, repairCtx).text;
+      taskCheck = validateTask({ what: actionText, how, why, done, minutes: structured.action_minutes });
+      if (!taskCheck.ok) {
+        console.log("[chat] next task withheld (not concrete enough)", { requestId, missing: taskCheck.missing });
+        actionText = "";
+        taskCheck = null;
+      }
+    }
+    // Provisional answers still get the best available next step: a small
+    // evidence-gathering task, only when nothing else is pending or being asked.
+    const questionShown = decision.allow && !!structured.question;
+    if (!taskCheck && turnPhase === "investigate" && stateKnown && !questionShown && !signals.action_reported && !(searchState.activeTask?.status === "pending")) {
+      const fb = fallbackTask(projected);
+      taskCheck = validateTask(fb);
+      actionText = fb.what;
+    }
+
     // One question per reply. If the model also supplied the gated `question`
     // field, every question sentence in the body is dropped (otherwise a
     // body question could slip past the repeat-question gate); if it didn't,
@@ -1164,6 +1224,9 @@ export async function POST(request) {
       const note = unverifiedNote(language);
       replyBody = replyBody ? `${replyBody}\n\n${note}` : note;
     }
+    const noClaims = stripCompletenessClaims(replyBody);
+    if (noClaims.removed > 0) console.log("[chat] completeness claim removed", { requestId, count: noClaims.removed });
+    replyBody = noClaims.text;
     const finalReply = composeReply(replyBody, structured.question, decision) || "Thanks for sharing that.";
     const actionFlag = actionText && !structured.action_basis ? "general" : "";
     // Comparison rows count only if their quotes are really in the user's own
@@ -1178,6 +1241,12 @@ export async function POST(request) {
       comparison,
       uncertainty: fixedUncertainty.text,
       success_check: actionText ? fixedCheck.text : "",
+      action_how: taskCheck ? taskCheck.how : "",
+      action_why: taskCheck ? taskCheck.why : "",
+      action_done: taskCheck ? taskCheck.done : "",
+      action_minutes: taskCheck ? taskCheck.minutes : null,
+      question_why: decision.allow ? questionWhy : "",
+      outcome_stage: stageNow,
       tip: fixedTip.text,
       question: undefined,
       topics: undefined,
@@ -1205,6 +1274,8 @@ export async function POST(request) {
     // Case focus; user-reported warning-sign IDS only (never their words);
     // the most recent fact the user changed; a step the user reported on.
     if (focus && (!stateKnown || focus !== searchState.focus)) writes.focus = focus;
+    if (stateKnown && questionShown) writes.questionsAsked = questionsBefore + 1;
+    if (stateKnown && stageNow && stageNow !== searchState.outcomeStage) writes.outcomeStage = stageNow;
     for (const id of newWarnings) if (!savedWarnings.includes(id)) writes[`warningSigns.${id}`] = { at: nowTs };
     if (stateKnown) {
       for (const field of ["roleTarget", "location", "experienceLevel", "applicationsTotal", "responses", "interviews", "viewedCount"]) {
@@ -1252,9 +1323,9 @@ export async function POST(request) {
 
         // HARD UNDERSTAND-PHASE GATE.
         if (turnPhase === "understand") {
-          structured = { ...understandGate(structured, signals), ready_to_investigate_deeper: false };
-          const completeness = computeCaseCompleteness(searchState);
-          structured = { ...structured, ready_to_investigate_deeper: completeness.complete };
+          // The investigation now starts by itself (see "automatic readiness"),
+          // so no start-button flag is ever sent.
+          structured = { ...understandGate(structured, signals), ready_to_investigate_deeper: false, case_facts: [] };
         } else {
           structured = { ...structured, ready_to_investigate_deeper: false };
         }
@@ -1278,6 +1349,14 @@ export async function POST(request) {
         if (!diagnosisEarned) {
           structured = { ...structured, diagnosis: EMPTY_DIAGNOSIS() };
         }
+        // Provisional vs earned. Without a diagnosis, an investigate-phase
+        // answer is a provisional assessment: it must say what can't be told.
+        const hasFinding = !!(structured.insight || structured.signal || structured.leadingHypothesis);
+        const assessment = diagnosisEarned ? "diagnosis" : (turnPhase === "investigate" && hasFinding ? "provisional" : "none");
+        if (assessment === "provisional" && !structured.uncertainty) {
+          structured = { ...structured, uncertainty: limitationsText(searchState, computeReadiness(searchState, { warningIds: allWarnings })) };
+        }
+        structured = { ...structured, assessment };
         evidenceGateCompleted = true;
 
         if (diagnosisEarned) {
@@ -1307,14 +1386,15 @@ export async function POST(request) {
 
     // Final fail-closed gate, outside the persistence try/catch.
     if (turnPhase === "understand") {
-      const completeness = userId && searchState ? computeCaseCompleteness(searchState) : { complete: false };
       structured = {
         ...understandGate(structured, signals),
         hypotheses: [],
         feedback_mode: "none",
         diagnosis: EMPTY_DIAGNOSIS(),
         leadingHypothesis: null,
-        ready_to_investigate_deeper: completeness.complete === true,
+        ready_to_investigate_deeper: false,
+        case_facts: [],
+        assessment: "none",
       };
     } else {
       structured = { ...structured, ready_to_investigate_deeper: false };
@@ -1327,6 +1407,33 @@ export async function POST(request) {
           leadingHypothesis: null,
           feedback_mode: hasFinding && structured.feedback_mode !== "none" ? "signal" : "none",
         };
+      }
+    }
+
+    // ── Automatic start of the investigation (replaces the old button).
+    // The facts are saved and enough: move the case into the investigation and
+    // answer again in that phase so the user is never left waiting for a click.
+    // If the second answer fails, this understand-phase reply is returned and
+    // the saved phase makes the NEXT message an investigation turn anyway.
+    if (willTransition && stateKnown && userId && memorySaved && !isInternal) {
+      let moved = false;
+      try {
+        await withTimeout(updateSearchState(userId, { phase: "investigate" }), FIRESTORE_TIMEOUT_MS, "phase_auto_transition", requestId);
+        logEvent(userId, "phase_transition", { to: "investigate", auto: true, provisional: readinessNow?.provisional === true });
+        moved = true;
+      } catch (moveErr) {
+        console.error("[chat] automatic phase change failed", { requestId, message: moveErr?.message });
+      }
+      if (moved) {
+        const internalReq = { json: async () => ({ ...body }), headers: request.headers };
+        internalTransitions.add(internalReq);
+        try {
+          const second = await POST(internalReq);
+          if ((second?.status || 200) < 400) return second;
+          console.warn("[chat] investigation reply failed; returning the understand reply", { requestId, status: second?.status });
+        } catch (secondErr) {
+          console.error("[chat] investigation reply threw; returning the understand reply", { requestId, message: secondErr?.message });
+        }
       }
     }
 
