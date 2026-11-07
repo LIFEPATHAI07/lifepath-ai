@@ -157,7 +157,7 @@ const DIAGNOSIS_REASONS = [
   { id: "want_to_explain", label: "I want to explain what actually happened" },
 ];
 
-const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, onReplyFeedback, fbState, fbError, isLatest = false, busy = false }) => {
+const InvestigationCard = ({ data, onFeedback, onReplyFeedback, fbState, fbError, isLatest = false, busy = false }) => {
   const [replyFb, setReplyFb] = useState("idle"); // idle | open | saving | saved | error
   const [showReasons, setShowReasons] = useState(false);
   const [selectedReason, setSelectedReason] = useState("");
@@ -207,6 +207,9 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, onReplyFeedb
         {reply && !isDiagnosis && (
           <div style={{ padding: "14px 16px", color: "#e2e8f0", fontSize: 14, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
             {reply}
+            {data.question_why && isLatest && (
+              <div style={{ color: "#64748b", fontSize: 11.5, lineHeight: 1.5, marginTop: 8, fontStyle: "italic" }}>{"Why I'm asking: "}{data.question_why}</div>
+            )}
           </div>
         )}
 
@@ -288,7 +291,7 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, onReplyFeedb
 
         {uncertainty && (
           <div style={{ padding: "6px 16px 12px" }}>
-            {isDiagnosis && <div style={{ color: "#94a3b8", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 5 }}>WHAT WE DON'T KNOW YET</div>}
+            {(isDiagnosis || data.assessment === "provisional") && <div style={{ color: "#94a3b8", fontSize: 9, fontWeight: 700, letterSpacing: 2, marginBottom: 5 }}>{data.assessment === "provisional" ? "PROVISIONAL — WHAT I CAN'T TELL YET" : "WHAT WE DON'T KNOW YET"}</div>}
             <div style={{ color: "#64748b", fontSize: 12.5, lineHeight: 1.65, fontStyle: isDiagnosis ? "normal" : "italic", whiteSpace: "pre-wrap" }}>{uncertainty}</div>
           </div>
         )}
@@ -312,7 +315,10 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, onReplyFeedb
         {recommended_action && (
           <div style={{ padding: "12px 16px", background: "rgba(245,158,11,.05)", borderTop: "1px solid rgba(255,255,255,.04)" }}>
             <div style={{ color: "#f59e0b", fontSize: 10, fontWeight: 700, marginBottom: 5 }}>{isDiagnosis ? "WHAT WE'D INVESTIGATE NEXT" : "A small next step"}</div>
-            <div style={{ color: "#fbbf24", fontSize: 13.5, lineHeight: 1.65, fontWeight: 600, whiteSpace: "pre-wrap" }}>{recommended_action}</div>
+            <div style={{ color: "#fbbf24", fontSize: 13.5, lineHeight: 1.65, fontWeight: 600, whiteSpace: "pre-wrap" }}>{recommended_action}{data.action_minutes ? <span style={{ color: "#94a3b8", fontWeight: 400, fontSize: 12 }}>{`  ·  about ${data.action_minutes} min`}</span> : null}</div>
+            {data.action_how && <div style={{ color: "#cbd5e1", fontSize: 12.5, lineHeight: 1.6, marginTop: 8, whiteSpace: "pre-wrap" }}><b style={{ color: "#94a3b8" }}>How: </b>{data.action_how}</div>}
+            {data.action_why && <div style={{ color: "#cbd5e1", fontSize: 12.5, lineHeight: 1.6, marginTop: 5, whiteSpace: "pre-wrap" }}><b style={{ color: "#94a3b8" }}>Why it matters: </b>{data.action_why}</div>}
+            {data.action_done && <div style={{ color: "#cbd5e1", fontSize: 12.5, lineHeight: 1.6, marginTop: 5, whiteSpace: "pre-wrap" }}><b style={{ color: "#94a3b8" }}>{"You're done when: "}</b>{data.action_done}</div>}
             {data.success_check && (
               <div style={{ color: "#94a3b8", fontSize: 12, lineHeight: 1.6, marginTop: 8 }}>How to tell if it worked: {data.success_check}</div>
             )}
@@ -337,18 +343,6 @@ const InvestigationCard = ({ data, onInvestigateDeeper, onFeedback, onReplyFeedb
         {data.memory_saved === false && (
           <div style={{ padding: "8px 16px", color: "#94a3b8", fontSize: 11, fontStyle: "italic", borderTop: "1px solid rgba(255,255,255,.04)" }}>
             I couldn't save that last update, so I may need you to repeat it.
-          </div>
-        )}
-
-        {ready_to_investigate_deeper && isLatest && data.phase !== "investigate" && (
-          <div style={{ padding: "12px 16px", borderTop: "1px solid rgba(255,255,255,.04)" }}>
-            <div style={{ color: "#94a3b8", fontSize: 12, lineHeight: 1.6, marginBottom: 10 }}>
-              I now have the basics: your target role, location, experience and what has happened with your applications so far. Starting the investigation lets me test possible explanations and ask for specific evidence. It doesn't mean I have an answer yet.
-            </div>
-            <button onClick={onInvestigateDeeper} disabled={busy}
-              style={{ width: "100%", padding: "12px", background: "rgba(99,102,241,.1)", border: "1px solid rgba(99,102,241,.3)", borderRadius: 12, color: "#818cf8", fontWeight: 700, fontSize: 13, cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.5 : 1, fontFamily: "inherit" }}>
-              {busy ? "Starting..." : "I've shared enough. Start the investigation."}
-            </button>
           </div>
         )}
 
@@ -793,14 +787,6 @@ export default function LifePath() {
     }
   };
 
-  // Starting the investigation. Guarded against double taps: nothing happens
-  // while another request is in flight, and the server also refuses a second
-  // start without calling the AI.
-  const handleStartInvestigation = () => {
-    if (loading || sendingRef.current) return;
-    sendMessage("", undefined, "begin_investigation");
-  };
-
   // True clear: resets the persisted server-side investigation state,
   // then clears local UI state. If the server reset fails, we tell the
   // user rather than silently pretending it worked.
@@ -1015,7 +1001,6 @@ export default function LifePath() {
                     data={msg.structured}
                     isLatest={i === lastStructuredIndex}
                     busy={loading}
-                    onInvestigateDeeper={handleStartInvestigation}
                     onFeedback={(payload) => handleFeedback(i, payload)}
                     onReplyFeedback={(p) => saveFeedback({ feedbackType: "reply", rating: p.rating, reason: p.reason, snapshot: { phase: msg.structured.phase || null, requestId: msg.structured.requestId || null, messageIndex: i } })}
                     fbState={fbStates[i] || "idle"}
