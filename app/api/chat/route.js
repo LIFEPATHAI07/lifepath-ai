@@ -49,8 +49,11 @@ import { WARNING_SIGNS, WARNING_CARD_TITLE, VERIFICATION_NOTE, verifyWarningSign
 
 import { buildSystem, buildCompactSystem, buildExtractionSystemPrompt } from "../../../lib/prompts";
 import { authenticateRequest } from "../../../lib/auth";
-import { summarizeCaseFacts } from "../../../lib/caseSummary";
-import { sanitizeStage, stageOf, deriveOutcomeStage, computeReadiness, limitationsText, validateTask, fallbackTask, stripCompletenessClaims, TOPIC_REASONS } from "../../../lib/readiness";
+import { summarizeCaseFacts, summarizeCaseOverview } from "../../../lib/caseSummary";
+import { sanitizeStage, stageOf, deriveOutcomeStage, computeReadiness, limitationsText, validateTask, fallbackTask, stripCompletenessClaims, TOPIC_REASONS, MAX_QUESTIONS, wantsAssessment, mentionsHavingCv, planEvidence, canonicalQuestion, isNeverAsked, sanitizeTaskKind } from "../../../lib/readiness";
+import { stripQuestionSentences, stripPluralAttribution, stripBlanketCauses, stripNoResponseClaims, stripResearchClaims, stripStaleUnknowns, cleanOutput, detectResearchRequest, mentionsNoBrowsing, NO_BROWSING_NOTICE } from "../../../lib/outputGuards";
+import { sanitizeCvFindings, sanitizeFeedbackItems, sanitizeUserAssumptions, mergeCvProfile, mergeList, countFeedbackSources } from "../../../lib/evidence";
+import { decideCaseAction, activateCase, sanitizeCaseId, hasCaseContent } from "../../../lib/userMemory";
 import { normalizeMessages, createRateLimiter } from "../../../lib/requestGuards";
 import { STATUS_RANK, CONFIDENCE_RANK, enforceHypothesisEvidenceLadder, limitPromotion } from "../../../lib/evidenceGate";
 
@@ -401,6 +404,11 @@ const SAFE_DEFAULTS = {
   action_done: "",
   action_minutes: null,
   outcome_stage: "",
+  action_kind: "",
+  new_problem: false,
+  cv_findings: null,
+  feedback_items: [],
+  user_assumptions: [],
   next_question: "",
   question: null,
   comparison: [],
@@ -493,6 +501,11 @@ const sanitizeStructured = (parsed) => {
   merged.warning_signs = Array.isArray(parsed.warning_signs) ? parsed.warning_signs.slice(0, 12) : [];
   merged.case_focus = sanitizeFocus(parsed.case_focus);
   merged.outcome_stage = sanitizeStage(parsed.outcome_stage);
+  merged.action_kind = sanitizeTaskKind(parsed.action_kind);
+  merged.new_problem = parsed.new_problem === true;
+  merged.cv_findings = parsed.cv_findings && typeof parsed.cv_findings === "object" && !Array.isArray(parsed.cv_findings) ? parsed.cv_findings : null;
+  merged.feedback_items = Array.isArray(parsed.feedback_items) ? parsed.feedback_items.slice(0, 8) : [];
+  merged.user_assumptions = Array.isArray(parsed.user_assumptions) ? parsed.user_assumptions.slice(0, 6) : [];
   { const m = Number(parsed.action_minutes); merged.action_minutes = parsed.action_minutes != null && parsed.action_minutes !== "" && Number.isFinite(m) ? Math.round(m) : null; }
   merged.diagnosis = sanitizeDiagnosis(parsed.diagnosis);
   merged.signal = typeof parsed.signal === "string" ? parsed.signal.slice(0, 300) : "";
@@ -918,6 +931,7 @@ export async function POST(request) {
       messages.push({ role: "user", content: latestMsg });
     }
 
+    const reqCaseId = sanitizeCaseId(body.caseId);
     let searchState = null;
     let searchContext = "";
     // The phase in effect for THIS turn, frozen once and used both to build
@@ -928,6 +942,17 @@ export async function POST(request) {
       try {
         searchState = await withTimeout(ensureSearchState(userId), FIRESTORE_TIMEOUT_MS, "state_load", requestId);
         console.log("[chat] state loaded", { requestId, elapsedMs: elapsed() });
+
+        // Each conversation is its own investigation. A different conversation
+        // archives the active case and loads/starts its own, so nothing from
+        // another case can reach this one.
+        if (reqCaseId) {
+          const caseAction = decideCaseAction(searchState, reqCaseId, messages.filter((m) => m?.role === "user").length);
+          if (caseAction !== "same") {
+            searchState = await withTimeout(activateCase(userId, reqCaseId, caseAction, searchState), FIRESTORE_TIMEOUT_MS, "case_switch", requestId);
+            console.log("[chat] case", { requestId, action: caseAction });
+          }
+        }
 
         // Phase changes only after an explicit button action.
         if (isBeginInvestigation) {
@@ -974,6 +999,9 @@ export async function POST(request) {
       }
     }
 
+    if (detectResearchRequest(rawLatest)) {
+      searchContext += "\nCAPABILITY LIMIT: the user asked you to look something up (vacancies, an employer or the market). You CANNOT browse or search the web. Say so plainly in your first sentence, never claim to have searched or checked anything, and ask them to paste the posting or message so you can work from it.";
+    }
     console.log("[chat] search context chars:", searchContext.length);
 
     const systemPrompt = buildSystem(language, searchContext, safeName(profile?.name));
@@ -1038,6 +1066,25 @@ export async function POST(request) {
 
     let structured = sanitizeStructured(parsed);
     const signals = structured.signals;
+
+    // The user has started describing a DIFFERENT problem in this same chat
+    // (for example from a recruitment fee to an unpaid-salary dispute). Start a
+    // separate case and answer again from a clean slate, so facts, warnings
+    // and hypotheses from the first problem cannot leak into the second.
+    if (structured.new_problem === true && userId && searchState && !isInternal && !isBeginInvestigation && hasCaseContent(searchState)) {
+      const lastUser = [...messages].reverse().find((m) => m?.role === "user");
+      if (lastUser) {
+        const newId = `case_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+        const separate = { json: async () => ({ ...body, caseId: newId, messages: [{ role: "user", content: lastUser.content }] }), headers: request.headers };
+        internalTransitions.add(separate);
+        try {
+          const second = await POST(separate);
+          if ((second?.status || 200) < 400) return second;
+        } catch (e) {
+          console.error("[chat] new-case reply failed; continuing in the current case", { requestId, message: e?.message });
+        }
+      }
+    }
 // ════════════════════════════════════════════════════════════════════
     // CONVERSATION MEMORY PIPELINE. Everything here is computed in memory;
     // nothing is saved until the single combined write further down.
@@ -1060,6 +1107,12 @@ export async function POST(request) {
       : [];
     const allWarnings = [...new Set([...savedWarnings, ...newWarnings])];
     const focus = sanitizeFocus(structured.case_focus) || (stateKnown ? sanitizeFocus(searchState.focus) : "");
+    // What the CV shows, what employers actually said, and what the user only
+    // believes: each kept only if backed by the user's own words or CV text.
+    const cvFindings = sanitizeCvFindings(structured.cv_findings, userTexts);
+    const feedbackNew = sanitizeFeedbackItems(structured.feedback_items, userTexts);
+    const assumptionsNew = sanitizeUserAssumptions(structured.user_assumptions, userTexts);
+    const feedbackNow = mergeList(stateKnown ? searchState.feedbackItems : [], feedbackNew, 8);
 
     // 1. Facts the model reported (per-key, so one channel never wipes the other).
     const factUpdates = extractNonEmptyUpdates(structured.facts_update);
@@ -1115,7 +1168,7 @@ export async function POST(request) {
     const stageNow = sanitizeStage(structured.outcome_stage) || (stateKnown ? (sanitizeStage(searchState.outcomeStage) || deriveOutcomeStage({ ...projected, focus })) : "");
     const questionsBefore = stateKnown && Number.isFinite(searchState.questionsAsked) ? searchState.questionsAsked : 0;
     const readinessNow = stateKnown && turnPhase === "understand" && !isInternal
-      ? computeReadiness({ ...projected, ledger, focus, outcomeStage: stageNow, questionsAsked: questionsBefore }, { warningIds: allWarnings })
+      ? computeReadiness({ ...projected, ledger, focus, outcomeStage: stageNow, questionsAsked: questionsBefore }, { warningIds: allWarnings, forceReady: wantsAssessment(rawLatest) })
       : null;
     const willTransition = !!readinessNow?.ready;
 
@@ -1133,6 +1186,42 @@ export async function POST(request) {
     const questionWhy = structured.question ? (structured.question.why || TOPIC_REASONS[questionTopic] || "") : "";
     if (decision.allow && structured.question && !questionWhy) decision = { allow: false, reason: "no_reason" };
     if (willTransition && structured.question) decision = { allow: false, reason: "transitioning" };
+    // HARD ceiling on information-gathering questions per case. Never a target.
+    const questionsSoFar = Math.max(questionsBefore, stateKnown ? 0 : previousQuestions.length);
+    const capReached = questionsSoFar >= MAX_QUESTIONS;
+    if (decision.allow && structured.question) {
+      if (capReached) decision = { allow: false, reason: "cap" };
+      else if (isNeverAsked(questionTopic, stageNow)) decision = { allow: false, reason: "not_relevant" };
+    }
+    // Ask for the CV early when it matters, and never leave the user without a
+    // next step in the information-gathering phase: if the model asked nothing
+    // useful, the server asks the single most valuable missing thing itself.
+    const userWantsAnswer = wantsAssessment(rawLatest);
+    if (decision.allow && structured.question && userWantsAnswer) decision = { allow: false, reason: "user_wants_answer" };
+    const stopAsking = signals.emotion === "strong" || signals.tired || signals.direct_answer || userWantsAnswer;
+    const isOpening = userTexts.length <= 1 && !hasCaseContent(projected);
+    let questionWhyFinal = questionWhy;
+    if (!capReached && !willTransition && !stopAsking && !isBeginInvestigation && !isOpening) {
+      const evState = { ...projected, ledger, focus, outcomeStage: stageNow };
+      const cvFirst = mentionsHavingCv(userTexts.join(" "));
+      const planNow = planEvidence(evState, { cvFirst });
+      const nxt = planNow.next;
+      if (nxt) {
+        const modelShown = decision.allow && !!structured.question;
+        const modelCoreMissing = modelShown && planNow.items.some((i) => i.topic === questionTopic && i.st === "missing" && i.core);
+        const cvNext = nxt.topic === "cv";
+        const replaceModel = modelShown && cvNext && questionTopic !== "cv" && !modelCoreMissing;
+        if ((!modelShown || replaceModel) && (turnPhase === "understand" || cvNext)) {
+          const cq = canonicalQuestion(nxt.topic, evState);
+          if (cq) {
+            structured = { ...structured, question: { topic: cq.topic, text: cq.text, why: cq.why } };
+            decision = { allow: true, reason: "injected" };
+            questionWhyFinal = cq.why;
+            console.log("[chat] question supplied by the server", { requestId, topic: cq.topic, replacedModelQuestion: replaceModel });
+          }
+        }
+      }
+    }
     if (structured.question && !decision.allow) {
       console.log("[chat] question not shown", { requestId, topic: structured.question.topic || null, reason: decision.reason });
     }
@@ -1158,6 +1247,28 @@ export async function POST(request) {
     const fixedTip = repairText(structured.tip, repairCtx);
     const fixedUncertainty = repairText(structured.uncertainty, repairCtx);
     const fixedCheck = repairText(structured.success_check, repairCtx);
+    // Further checks on the wording itself (all replies, normal or fallback model):
+    // research that never happened, feedback attributed to too many sources,
+    // one weak spot blamed for everything, "no responses" for someone who never
+    // applied, "we still don't know X" when X is known, and cut-off output.
+    const guardCtx = {
+      userText: userTexts.join(" "),
+      feedbackSources: countFeedbackSources(feedbackNow),
+      neverApplied: projected.applicationsTotal === 0 || stageNow === "find_jobs" || stageNow === "not_applied",
+      canBrowse: false,
+    };
+    // `clean` (cut-off sentences, empty lists) is for prose only: a task title
+    // such as "Note what each posting asks for" is complete without a full stop.
+    const guardText = (text, { clean = true } = {}) => {
+      let x = String(text || "");
+      for (const f of [stripResearchClaims, stripPluralAttribution, stripBlanketCauses, stripNoResponseClaims]) x = f(x, guardCtx).text;
+      x = stripStaleUnknowns(x, projected).text;
+      return clean ? cleanOutput(x).text : x;
+    };
+    fixedReply.text = guardText(fixedReply.text);
+    fixedInsight.text = guardText(fixedInsight.text);
+    fixedUncertainty.text = guardText(fixedUncertainty.text);
+    fixedAction.text = guardText(fixedAction.text, { clean: false });
     const removedTotal = fixedReply.removed + fixedInsight.removed + fixedAction.removed + fixedTip.removed + fixedUncertainty.removed;
     const removedReasons = [...fixedReply.reasons, ...fixedInsight.reasons, ...fixedAction.reasons, ...fixedTip.reasons, ...fixedUncertainty.reasons];
     if (removedTotal > 0) {
@@ -1180,7 +1291,7 @@ export async function POST(request) {
       const how = repairText(structured.action_how, repairCtx).text;
       const why = repairText(structured.action_why || structured.action_basis, repairCtx).text;
       const done = repairText(structured.action_done, repairCtx).text;
-      taskCheck = validateTask({ what: actionText, how, why, done, minutes: structured.action_minutes });
+      taskCheck = validateTask({ what: actionText, how, why, done, minutes: structured.action_minutes, kind: structured.action_kind }, { state: { ...projected, ledger }, ledger, hypotheses: structured.hypotheses });
       if (!taskCheck.ok) {
         console.log("[chat] next task withheld (not concrete enough)", { requestId, missing: taskCheck.missing });
         actionText = "";
@@ -1191,7 +1302,7 @@ export async function POST(request) {
     // evidence-gathering task, only when nothing else is pending or being asked.
     const questionShown = decision.allow && !!structured.question;
     if (!taskCheck && turnPhase === "investigate" && stateKnown && !questionShown && !signals.action_reported && !(searchState.activeTask?.status === "pending")) {
-      const fb = fallbackTask(projected);
+      const fb = fallbackTask({ ...projected, outcomeStage: stageNow });
       taskCheck = validateTask(fb);
       actionText = fb.what;
     }
@@ -1200,7 +1311,7 @@ export async function POST(request) {
     // field, every question sentence in the body is dropped (otherwise a
     // body question could slip past the repeat-question gate); if it didn't,
     // only the first body question is kept. Quoted questions are untouched.
-    const questionCap = limitQuestions(fixedReply.text, { dropAll: !!structured.question });
+    const questionCap = limitQuestions(fixedReply.text, { dropAll: true });
     if (questionCap.dropped > 0) {
       console.log("[chat] extra questions in reply body dropped", { requestId, count: questionCap.dropped, hadGatedQuestion: !!structured.question });
     }
@@ -1227,6 +1338,9 @@ export async function POST(request) {
     const noClaims = stripCompletenessClaims(replyBody);
     if (noClaims.removed > 0) console.log("[chat] completeness claim removed", { requestId, count: noClaims.removed });
     replyBody = noClaims.text;
+    if (detectResearchRequest(rawLatest) && !mentionsNoBrowsing(replyBody)) {
+      replyBody = replyBody ? `${NO_BROWSING_NOTICE}\n\n${replyBody}` : NO_BROWSING_NOTICE;
+    }
     const finalReply = composeReply(replyBody, structured.question, decision) || "Thanks for sharing that.";
     const actionFlag = actionText && !structured.action_basis ? "general" : "";
     // Comparison rows count only if their quotes are really in the user's own
@@ -1245,7 +1359,7 @@ export async function POST(request) {
       action_why: taskCheck ? taskCheck.why : "",
       action_done: taskCheck ? taskCheck.done : "",
       action_minutes: taskCheck ? taskCheck.minutes : null,
-      question_why: decision.allow ? questionWhy : "",
+      question_why: decision.allow ? questionWhyFinal : "",
       outcome_stage: stageNow,
       tip: fixedTip.text,
       question: undefined,
@@ -1275,6 +1389,9 @@ export async function POST(request) {
     // the most recent fact the user changed; a step the user reported on.
     if (focus && (!stateKnown || focus !== searchState.focus)) writes.focus = focus;
     if (stateKnown && questionShown) writes.questionsAsked = questionsBefore + 1;
+    if (stateKnown && cvFindings) writes.cvProfile = mergeCvProfile(searchState.cvProfile, cvFindings);
+    if (stateKnown && feedbackNew.length) writes.feedbackItems = feedbackNow;
+    if (stateKnown && assumptionsNew.length) writes.userAssumptions = mergeList(searchState.userAssumptions, assumptionsNew, 5);
     if (stateKnown && stageNow && stageNow !== searchState.outcomeStage) writes.outcomeStage = stageNow;
     for (const id of newWarnings) if (!savedWarnings.includes(id)) writes[`warningSigns.${id}`] = { at: nowTs };
     if (stateKnown) {
@@ -1448,13 +1565,23 @@ export async function POST(request) {
 
     // One neutral card: the warning signs the user described, plus the note
     // that nothing was verified. No score, no label, no verdict.
-    const warningCard = allWarnings.length
+    // It appears only when it belongs to THIS situation: a warning sign reported
+    // in this message, or a case that is about a suspected offer. An old warning
+    // from an unrelated problem never rides along.
+    const warningRelevant = newWarnings.length > 0 || focus === "job_offer_check" || stageNow === "scam_suspected";
+    const warningCard = allWarnings.length && warningRelevant
       ? { title: WARNING_CARD_TITLE, signs: allWarnings.map((id) => WARNING_SIGNS[id]), note: VERIFICATION_NOTE }
       : null;
 
     console.log("[chat] request complete", { requestId, elapsedMs: elapsed(), engine: usedFallback ? "groq" : "gemini", phase: turnPhase, memorySaved });
     return NextResponse.json({
-      structured: { ...structured, phase: turnPhase, show_stats: showStats, action_flag: shownActionFlag, warning_card: warningCard, focus, requestId },
+      structured: {
+        ...structured, phase: turnPhase, show_stats: showStats, action_flag: shownActionFlag, warning_card: warningCard, focus, requestId,
+        // The case this answer belongs to, so the browser can keep each chat tied to its own investigation.
+        case_id: (stateKnown && searchState.caseId) || reqCaseId || "",
+        // What is on file for the case, built from saved facts (never from the model's own summary).
+        case_facts: turnPhase === "investigate" && stateKnown ? summarizeCaseOverview({ ...projected, ledger, outcomeStage: stageNow }) : (structured.case_facts || []),
+      },
       verified_stats: showStats ? verifiedStats : null,
       memory_saved: memorySaved,
       language,
